@@ -1,4 +1,4 @@
-import { BlockPermutation, Direction, system, world } from "@minecraft/server";
+import { BlockPermutation, BlockVolume, Direction, StructureSaveMode, system, world } from "@minecraft/server";
 import { CONFIG } from "./config.js";
 import { clearBlockOwner, getBlockOwner, setBlockOwner } from "./ownership.js";
 import { explosiveOwner } from "./tnt.js";
@@ -11,6 +11,7 @@ import { queueAdminNotice } from "./inbox.js";
 //   p: 설치  [.., 설치한블럭]
 //   b: 파괴  [.., 블럭, 상태, 원래주인]
 //   x: 폭발  [.., 블럭, 상태, 원래주인]   (그 플레이어의 TNT로 부서진 블럭)
+//   c: 상자 등 컨테이너 파괴 [.., 구조물id(내용물 포함 저장), 원래주인]
 //   l: 액체  [.., 위치 두 곳 중 하나]
 //   f: 불
 
@@ -90,9 +91,20 @@ system.runInterval(() => {
   for (const key of world.getDynamicPropertyIds()) {
     if (!key.startsWith(LOG_PREFIX)) continue;
     const time = Number(key.slice(key.lastIndexOf(":") + 1).split("-")[0]);
-    if (time < cutoff) world.setDynamicProperty(key, undefined);
+    if (time < cutoff) {
+      deleteStructures(world.getDynamicProperty(key));
+      world.setDynamicProperty(key, undefined);
+    }
   }
 }, 20 * 60 * 5);
+
+function deleteStructures(raw) {
+  try {
+    for (const entry of JSON.parse(String(raw))) {
+      if (entry[1] === "c") world.structureManager.delete(entry[6]);
+    }
+  } catch {}
+}
 
 // ---------- 기록 ----------
 
@@ -101,9 +113,92 @@ function permutationData(permutation) {
 }
 
 world.afterEvents.playerPlaceBlock.subscribe(({ block, player, dimension }) => {
-  setBlockOwner(dimension.id, block.location, player.id);
-  record(player.id, "p", dimension.id, block.location, block.typeId);
+  const location = { ...block.location };
+  setBlockOwner(dimension.id, location, player.id);
+  record(player.id, "p", dimension.id, location, block.typeId);
+  // 문/침대 같은 두 칸짜리 블럭은 나머지 한 칸도 주인 기록
+  system.run(() => {
+    for (const other of otherHalves(dimension, location)) {
+      setBlockOwner(dimension.id, other, player.id);
+      record(player.id, "p", dimension.id, other, dimension.getBlock(other)?.typeId ?? "");
+    }
+  });
 });
+
+const HORIZONTAL = [
+  [1, 0, 0],
+  [-1, 0, 0],
+  [0, 0, 1],
+  [0, 0, -1],
+];
+const VERTICAL = [
+  [0, 1, 0],
+  [0, -1, 0],
+];
+
+function isTwoBlockType(typeId) {
+  return (typeId.includes("door") && !typeId.includes("trapdoor")) || typeId === "minecraft:bed" || typeId.includes("double_plant") ||
+    ["minecraft:tall_grass", "minecraft:large_fern", "minecraft:sunflower", "minecraft:lilac", "minecraft:rose_bush", "minecraft:peony",
+      "minecraft:pitcher_plant", "minecraft:small_dripleaf_block"].includes(typeId);
+}
+
+function otherHalves(dimension, location) {
+  const result = [];
+  try {
+    const typeId = dimension.getBlock(location)?.typeId;
+    if (!typeId || !isTwoBlockType(typeId)) return result;
+    const offsets = typeId === "minecraft:bed" ? HORIZONTAL : VERTICAL;
+    for (const [dx, dy, dz] of offsets) {
+      const pos = { x: location.x + dx, y: location.y + dy, z: location.z + dz };
+      if (dimension.getBlock(pos)?.typeId === typeId && getBlockOwner(dimension.id, pos) === undefined) {
+        result.push(pos);
+        if (typeId === "minecraft:bed") break;
+      }
+    }
+  } catch {}
+  return result;
+}
+
+// 상자/통/화로 등 컨테이너는 부수기 직전에 내용물째 구조물로 저장해 두었다가 되돌릴 때 그대로 복구
+let structureSeq = 0;
+world.beforeEvents.playerBreakBlock.subscribe((event) => {
+  const { block, player } = event;
+  if (event.cancel || block.typeId.endsWith("shulker_box")) return;
+  let isContainer = false;
+  try {
+    isContainer = !!block.getComponent("minecraft:inventory");
+  } catch {}
+  if (!isContainer) return;
+  event.cancel = true;
+  const dimension = block.dimension;
+  const location = { ...block.location };
+  const playerId = player.id;
+  system.run(() => breakContainer(dimension, location, playerId));
+});
+
+function breakContainer(dimension, location, playerId) {
+  const block = dimension.getBlock(location);
+  if (!block || block.isAir) return;
+  const permutation = block.permutation;
+  const id = `mlc:rb${Date.now().toString(36)}${(structureSeq++).toString(36)}`;
+  let saved = false;
+  try {
+    world.structureManager.createFromWorld(id, dimension, location, location, {
+      includeEntities: false,
+      saveMode: StructureSaveMode.World,
+    });
+    saved = true;
+  } catch {}
+  const previousOwner = getBlockOwner(dimension.id, location) ?? 0;
+  clearBlockOwner(dimension.id, location);
+  try {
+    dimension.runCommand(`setblock ${location.x} ${location.y} ${location.z} air destroy`);
+  } catch {
+    block.setType("minecraft:air");
+  }
+  if (saved) record(playerId, "c", dimension.id, location, id, previousOwner);
+  else record(playerId, "b", dimension.id, location, ...permutationData(permutation), previousOwner);
+}
 
 world.afterEvents.playerBreakBlock.subscribe(({ block, brokenBlockPermutation, dimension, player }) => {
   const previousOwner = getBlockOwner(dimension.id, block.location) ?? 0;
@@ -163,6 +258,7 @@ export function startRollback(playerId, playerName) {
   }
   // 최근 행동부터 거꾸로 되돌림
   entries.sort((a, b) => b[0] - a[0]);
+  for (const entry of entries) if (entry[1] === "p") entry[7] = playerId;
   chunkEntries(entries).forEach((chunk, i) => {
     const key = `${QUEUE_PREFIX}${Date.now()}-${String(i).padStart(5, "0")}`;
     world.setDynamicProperty(key, JSON.stringify(chunk));
@@ -172,9 +268,41 @@ export function startRollback(playerId, playerName) {
   return entries.length;
 }
 
+const isReplaceable = (block) =>
+  block.isAir || block.isLiquid || block.typeId === "minecraft:fire" || block.typeId === "minecraft:soul_fire" ||
+  block.typeId === "minecraft:cobblestone" || block.typeId === "minecraft:obsidian";
+
+const FLOWING = ["minecraft:flowing_lava", "minecraft:flowing_water"];
+const LAVA_LEFTOVERS = ["minecraft:cobblestone", "minecraft:obsidian"];
+
+/** 부은 용암/물이 흘러간 자리와 그 때문에 생긴 조약돌/흑요석 정리 */
+function clearLiquidArea(dimension, center) {
+  const volume = new BlockVolume(
+    { x: center.x - 8, y: center.y - 24, z: center.z - 8 },
+    { x: center.x + 8, y: center.y + 1, z: center.z + 8 }
+  );
+  // 누가 설치한 블럭은 건드리지 않고, 기록 없는 조약돌/흑요석 중 액체에 닿아 있는 것만 (용암+물로 생긴 것)
+  const leftovers = [];
+  for (const location of dimension.getBlocks(volume, { includeTypes: LAVA_LEFTOVERS }, false).getBlockLocationIterator()) {
+    if (getBlockOwner(dimension.id, location) === undefined && touchesLiquid(dimension, location)) leftovers.push(location);
+  }
+  for (const location of dimension.getBlocks(volume, { includeTypes: FLOWING }, false).getBlockLocationIterator()) {
+    dimension.getBlock(location)?.setType("minecraft:air");
+  }
+  for (const location of leftovers) dimension.getBlock(location)?.setType("minecraft:air");
+}
+
+function touchesLiquid(dimension, location) {
+  for (const [dx, dy, dz] of [...HORIZONTAL, ...VERTICAL]) {
+    const b = dimension.getBlock({ x: location.x + dx, y: location.y + dy, z: location.z + dz });
+    if (b && b.isLiquid) return true;
+  }
+  return false;
+}
+
 function restore(block, entry) {
   const [, , , , , , typeId, states, previousOwner] = entry;
-  if (!block.isAir && !block.isLiquid && block.typeId !== "minecraft:fire") return;
+  if (!isReplaceable(block)) return;
   let permutation;
   try {
     permutation = BlockPermutation.resolve(typeId, states);
@@ -198,18 +326,40 @@ function undo(entry) {
   if (!block) return false;
   try {
     switch (op) {
-      case "p":
-        if (block.typeId === typeId) {
+      case "p": {
+        // 같은 블럭이거나(불 켜진 화로처럼 모양이 바뀐 것 포함) 아직 그 사람 소유로 기록된 블럭이면 제거
+        const ownedByThem = entry[7] !== undefined && getBlockOwner(dimension.id, block.location) === entry[7];
+        if (!block.isAir && (block.typeId === typeId || ownedByThem)) {
           block.setType("minecraft:air");
           clearBlockOwner(dimension.id, block.location);
         }
         break;
+      }
+      case "c": {
+        const [, , , , , , structureId, previousOwner] = entry;
+        if (isReplaceable(block)) {
+          try {
+            world.structureManager.place(structureId, dimension, { x, y, z }, { includeEntities: false });
+          } catch {
+            return false;
+          }
+          if (previousOwner) setBlockOwner(dimension.id, block.location, previousOwner);
+        }
+        world.structureManager.delete(structureId);
+        break;
+      }
       case "b":
       case "x":
         restore(block, entry);
         break;
       case "l":
+        try {
+          clearLiquidArea(dimension, { x, y, z });
+        } catch {
+          return false; // 주변 청크가 아직 로딩 안 됨
+        }
         if (block.typeId.includes("lava") || block.typeId.includes("water")) block.setType("minecraft:air");
+        else if (block.isWaterlogged) block.setWaterlogged(false);
         break;
       case "f":
         if (block.typeId === "minecraft:fire" || block.typeId === "minecraft:soul_fire") block.setType("minecraft:air");

@@ -8,57 +8,125 @@ import { startRollback } from "./activity.js";
 
 const BAN_PREFIX = "mlc:ban:";
 const ROLLBACK_CATEGORY = "테러";
+const KICK_DELAY_TICKS = 200;
 
-/** @returns {{ id: string, name: string, category: string, reason: string, by: string, time: number }[]} */
-export function getBans() {
-  const bans = [];
+const normalize = (name) => String(name).toLowerCase().replace(/\s+/g, "");
+
+/** @type {Map<string, { id: string, name: string, category: string, reason: string, by: string, time: number }> | undefined} 저장 키 -> 밴 정보 */
+let banCache;
+
+function loadBans() {
+  if (banCache) return banCache;
+  banCache = new Map();
   for (const key of world.getDynamicPropertyIds()) {
     if (!key.startsWith(BAN_PREFIX)) continue;
     try {
-      bans.push(JSON.parse(String(world.getDynamicProperty(key))));
+      banCache.set(key, JSON.parse(String(world.getDynamicProperty(key))));
     } catch {}
   }
-  return bans.sort((a, b) => b.time - a.time);
+  return banCache;
 }
 
-function getBan(playerId) {
-  try {
-    const raw = world.getDynamicProperty(BAN_PREFIX + playerId);
-    return typeof raw === "string" ? JSON.parse(raw) : undefined;
-  } catch {
-    return undefined;
+export function getBans() {
+  return [...loadBans().values()].sort((a, b) => b.time - a.time);
+}
+
+/** 플레이어 id 또는 이름(대소문자/띄어쓰기 무시)으로 밴 찾기 */
+function findBan(player) {
+  const name = normalize(player.name);
+  for (const ban of loadBans().values()) {
+    if (ban.id === player.id || normalize(ban.name) === name) return ban;
+  }
+  return undefined;
+}
+
+/** 같은 id 또는 같은 이름으로 저장된 밴을 전부 삭제 */
+export function unbanPlayer(ban) {
+  const name = normalize(ban.name);
+  for (const [key, other] of [...loadBans()]) {
+    if (other.id === ban.id || normalize(other.name) === name) {
+      world.setDynamicProperty(key, undefined);
+      banCache.delete(key);
+    }
   }
 }
 
-function kickMessage(ban) {
+function banText(ban) {
   const reason = ban.reason ? ` (${ban.reason})` : "";
-  return (
-    `§c서버 규칙을 위반 했습니다.§r (${ban.category}) 를 위반${reason} ` +
-    `§7이 밴에 문제가 있으면 관리자에게 문의하세요 §b${CONFIG.ban.discord}`
-  );
+  return `§c서버 규칙을 위반 했습니다.§r (${ban.category}) 를 위반${reason} §7이 밴에 문제가 있으면 관리자에게 문의하세요 §b${CONFIG.ban.discord}`;
 }
 
 function kick(player, ban) {
   const name = player.name.replace(/"/g, "");
   try {
-    world.getDimension("minecraft:overworld").runCommand(`kick "${name}" ${kickMessage(ban)}`);
+    world.getDimension("minecraft:overworld").runCommand(`kick "${name}" ${banText(ban)}`);
   } catch {}
 }
 
-// 밴 당한 플레이어는 접속하자마자 내보냄 (혹시 몰라 주기적으로도 확인)
+const pending = new Set(); // 밴 이유를 보여주고 내보내기를 기다리는 플레이어 id
+
+export function isBanPending(player) {
+  return pending.has(player.id);
+}
+
+/** 밴 이유를 화면/채팅/창으로 확실히 보여준 뒤 내보냄 */
+function removeBannedPlayer(player, ban) {
+  if (pending.has(player.id) || isAdmin(player)) return;
+  pending.add(player.id);
+  const id = player.id;
+  try {
+    for (const effect of ["blindness", "slowness", "mining_fatigue", "weakness"]) {
+      player.addEffect(effect, KICK_DELAY_TICKS + 100, { amplifier: 255, showParticles: false });
+    }
+    player.onScreenDisplay.setTitle("§c밴 당했습니다", { subtitle: `§f(${ban.category}) 위반`, fadeInDuration: 0, stayDuration: KICK_DELAY_TICKS, fadeOutDuration: 10 });
+    player.sendMessage(banText(ban));
+  } catch {}
+  let kicked = false;
+  const kickOnce = () => {
+    if (kicked) return;
+    kicked = true;
+    pending.delete(id);
+    if (player.isValid) kick(player, ban);
+  };
+  const form = new ActionFormData()
+    .title("§c서버 이용이 제한되었습니다")
+    .body(
+      `§c서버 규칙을 위반 했습니다.§r\n\n§e카테고리:§r ${ban.category}\n§e이유:§r ${ban.reason || "(없음)"}\n§e날짜:§r ${formatTime(ban.time)}\n\n` +
+        `이 밴에 문제가 있으면 관리자에게 문의하세요\n§b${CONFIG.ban.discord}`
+    )
+    .button("확인");
+  showForm(player, form)
+    .then(() => system.runTimeout(kickOnce, 20))
+    .catch(() => {});
+  system.runTimeout(kickOnce, KICK_DELAY_TICKS);
+}
+
+// 밴 당한 플레이어가 기다리는 동안 아무것도 못 하게
+world.beforeEvents.playerInteractWithBlock.subscribe((event) => {
+  if (pending.has(event.player.id)) event.cancel = true;
+});
+world.beforeEvents.playerBreakBlock.subscribe((event) => {
+  if (pending.has(event.player.id)) event.cancel = true;
+});
+world.beforeEvents.itemUse.subscribe((event) => {
+  if (pending.has(event.source.id)) event.cancel = true;
+});
+
+// 밴 당한 플레이어는 접속하면 이유를 보여주고 내보냄 (혹시 몰라 주기적으로도 확인)
 world.afterEvents.playerSpawn.subscribe(({ player, initialSpawn }) => {
   if (!initialSpawn) return;
-  const ban = getBan(player.id);
-  if (ban && !isAdmin(player)) system.run(() => kick(player, ban));
+  const ban = findBan(player);
+  if (ban) removeBannedPlayer(player, ban);
 });
 
 system.runInterval(() => {
   for (const player of world.getAllPlayers()) {
-    if (isAdmin(player)) continue;
-    const ban = getBan(player.id);
-    if (ban) kick(player, ban);
+    const ban = findBan(player);
+    if (ban) removeBannedPlayer(player, ban);
   }
 }, 100);
+
+world.afterEvents.playerLeave.subscribe(({ playerId }) => pending.delete(playerId));
 
 export function banPlayer(admin, target, category, reason) {
   const ban = {
@@ -70,13 +138,14 @@ export function banPlayer(admin, target, category, reason) {
     time: Date.now(),
   };
   world.setDynamicProperty(BAN_PREFIX + target.id, JSON.stringify(ban));
+  loadBans().set(BAN_PREFIX + target.id, ban);
   let message = `§e${target.name}§r 를 밴했습니다. (${category}${ban.reason ? ` - ${ban.reason}` : ""})`;
   if (category === ROLLBACK_CATEGORY) {
     const count = startRollback(target.id, target.name);
     message += `\n최근 ${CONFIG.rollback.hours}시간 행동 ${count}개를 되돌립니다.`;
   }
   const online = findOnlinePlayer(target.id);
-  if (online) kick(online, ban);
+  if (online) removeBannedPlayer(online, ban);
   admin.sendMessage(PREFIX + message);
 }
 
@@ -138,7 +207,7 @@ export async function openUnbanMenu(admin) {
     const action = await showForm(admin, detail);
     if (!action || action.canceled) return;
     if (action.selection === 0) {
-      world.setDynamicProperty(BAN_PREFIX + ban.id, undefined);
+      unbanPlayer(ban);
       admin.sendMessage(PREFIX + `§e${ban.name}§r 의 밴을 해제했습니다.`);
       return;
     }

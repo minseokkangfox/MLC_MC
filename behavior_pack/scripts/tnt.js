@@ -120,10 +120,17 @@ world.beforeEvents.explosion.subscribe((event) => {
   const ownerIndex = typeof owner === "string" ? getOwnerIndex(owner) : undefined;
   const dimensionId = event.dimension.id;
 
+  const mine = (index) => index === undefined || (ownerIndex !== undefined && index === ownerIndex);
   const blocks = event.getImpactedBlocks();
   const allowed = blocks.filter((block) => {
-    const blockOwner = getBlockOwnerIndex(dimensionId, block.location);
-    return blockOwner === undefined || (ownerIndex !== undefined && blockOwner === ownerIndex);
+    const { x, y, z } = block.location;
+    if (!mine(getBlockOwnerIndex(dimensionId, block.location))) return false;
+    // 다른 사람 블럭(문, 침대, 횃불, 레일 등)을 받치고 있는 블럭도 지켜서 같이 떨어지지 않게
+    for (const offset of NEIGHBORS) {
+      const neighbor = { x: x + offset.x, y: y + offset.y, z: z + offset.z };
+      if (!mine(getBlockOwnerIndex(dimensionId, neighbor))) return false;
+    }
+    return true;
   });
   if (allowed.length !== blocks.length) event.setImpactedBlocks(allowed);
 });

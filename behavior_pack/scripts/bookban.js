@@ -83,14 +83,65 @@ function checkContainerBlock(block, who) {
   if (isShulker(block.typeId)) {
     const bytes = containerBytes(container);
     if (bytes > cfg.maxShulkerBytes) {
-      container.clearAll();
-      block.setType("minecraft:air");
-      notifyAdmins(`§c북밴 의심 셜커 상자 제거§r (${bytes}B) @ ${where}${who ? ` (${who})` : ""}`);
+      destroyShulker(block.dimension, block.location, bytes, who);
       return;
     }
   }
   purgeContainer(container, `${block.typeId.replace("minecraft:", "")} @ ${where}`);
 }
+
+/** 설치된 셜커의 내용물 용량 (읽기 전용 모드에서도 가능) */
+function placedShulkerBytes(block) {
+  const container = block.getComponent("minecraft:inventory")?.container;
+  return container ? containerBytes(container) : 0;
+}
+
+function destroyShulker(dimension, location, bytes, who) {
+  const block = dimension.getBlock(location);
+  if (!block || !isShulker(block.typeId)) return;
+  block.getComponent("minecraft:inventory")?.container?.clearAll();
+  block.setType("minecraft:air");
+  notifyAdmins(`§c북밴 의심 셜커 상자 제거§r (${bytes}B) @ ${shortDimension(dimension.id)} ${formatLocation(location)}${who ? ` (${who})` : ""}`);
+}
+
+// 셜커를 부수는 순간 검사: 아이템이 된 셜커는 스크립트로 안을 볼 수 없어서,
+// 땅에 떨어져 다른 사람이 줍기 전에 블럭 상태일 때 막아야 함
+world.beforeEvents.playerBreakBlock.subscribe((event) => {
+  if (!cfg.enabled || !isShulker(event.block.typeId)) return;
+  let bytes = 0;
+  try {
+    bytes = placedShulkerBytes(event.block);
+  } catch {}
+  if (bytes <= cfg.maxShulkerBytes) return;
+  event.cancel = true;
+  const dimension = event.block.dimension;
+  const location = { ...event.block.location };
+  const who = event.player.name;
+  system.run(() => destroyShulker(dimension, location, bytes, who));
+});
+
+// 폭발로 셜커가 아이템이 되는 것도 막음
+world.beforeEvents.explosion.subscribe((event) => {
+  if (!cfg.enabled) return;
+  const blocks = event.getImpactedBlocks();
+  const bad = [];
+  const kept = blocks.filter((block) => {
+    if (!isShulker(block.typeId)) return true;
+    let bytes = 0;
+    try {
+      bytes = placedShulkerBytes(block);
+    } catch {}
+    if (bytes <= cfg.maxShulkerBytes) return true;
+    bad.push({ location: { ...block.location }, bytes });
+    return false;
+  });
+  if (bad.length === 0) return;
+  event.setImpactedBlocks(kept);
+  const dimension = event.dimension;
+  system.run(() => {
+    for (const { location, bytes } of bad) destroyShulker(dimension, location, bytes);
+  });
+});
 
 world.afterEvents.playerPlaceBlock.subscribe(({ block, player }) => {
   if (isShulker(block.typeId)) checkContainerBlock(block, player.name);
