@@ -1,6 +1,6 @@
 import { BlockVolume, system, world } from "@minecraft/server";
 import { CONFIG } from "./config.js";
-import { formatLocation, shortDimension } from "./util.js";
+import { blockKey, formatLocation, shortDimension, tempCommandBlocks } from "./util.js";
 import { queueAdminNotice } from "./inbox.js";
 import { isForceSurvival } from "./gamemode.js";
 
@@ -66,6 +66,7 @@ function rebuildQueue() {
 }
 
 function removeCommandBlock(dimension, location) {
+  if (tempCommandBlocks.has(blockKey(dimension.id, location))) return; // 밴 kick 용 커맨드 블록
   const block = dimension.getBlock(location);
   if (!block) return;
   const type = block.typeId.replace("minecraft:", "");

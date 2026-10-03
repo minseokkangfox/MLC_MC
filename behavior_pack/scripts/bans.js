@@ -1,7 +1,7 @@
 import { InputPermissionCategory, system, world } from "@minecraft/server";
 import { ActionFormData, ModalFormData } from "@minecraft/server-ui";
 import { CONFIG } from "./config.js";
-import { PREFIX, isAdmin } from "./util.js";
+import { PREFIX, blockKey, isAdmin, tempCommandBlocks } from "./util.js";
 import { PLAYER_ICON, formatTime, playerButtonText, showForm } from "./forms.js";
 import { findOnlinePlayer, getKnownPlayers } from "./players.js";
 import { startRollback } from "./activity.js";
@@ -55,27 +55,64 @@ function banText(ban) {
   return `§c서버 규칙을 위반 했습니다.§r (${ban.category}) 를 위반${reason} §7이 밴에 문제가 있으면 관리자에게 문의하세요 §b${CONFIG.ban.discord}`;
 }
 
-// 스크립트가 서버(호스트) 이름으로 /kick 을 실행하면 "호스트에 의해 차단" 으로 처리되어
-// 렐름이 다시 켜질 때까지 못 들어오는 것으로 보임. 관리자가 직접 /kick 하는 것처럼
-// 플레이어(접속 중인 관리자, 없으면 밴 당한 본인)를 명령어 실행 주체로 해서 kick.
+// 스크립트가 직접 /kick 하면 "호스트에 의해 차단" 으로 처리되어 렐름이 다시 켜질 때까지 못 들어오고 이유도 안 보임.
+// 관리자가 예전에 쓰던 방식처럼 진짜 커맨드 블록이 kick 하게 함:
+// 밴 당한 플레이어 발밑 맨 아래(기반암 층)에 반복 커맨드 블록 구조물(mlc:kick_<카테고리 번호>)을 잠깐 놓고,
+// 그 블록이 "kick @a[tag=mlc_kick_<번호>] 밴 메시지" 를 실행한 뒤 원래 블록으로 되돌림.
+// 구조물 파일은 tools/make_kick_structures.py 로 만듦.
 const lastKick = new Map(); // 플레이어 id -> 틱 (같은 사람을 연달아 여러 번 kick 하지 않도록)
+const KICK_TAG = "mlc_kick_";
+
+function scriptKick(player, ban) {
+  const name = player.name.replace(/"/g, "");
+  try {
+    world.getDimension("minecraft:overworld").runCommand(`kick "${name}" ${banText(ban)}`);
+  } catch {}
+}
+
+function clearKickTags(player) {
+  for (const tag of player.getTags()) if (tag.startsWith(KICK_TAG)) player.removeTag(tag);
+}
 
 function kick(player, ban) {
   const now = system.currentTick;
-  if (now - (lastKick.get(player.id) ?? -1000) < 40) return;
+  if (now - (lastKick.get(player.id) ?? -1000) < 60) return;
   lastKick.set(player.id, now);
-  const name = player.name.replace(/"/g, "");
-  const command = `kick "${name}" ${banText(ban)}`;
-  const admin = world.getAllPlayers().find((p) => isAdmin(p));
-  for (const source of [admin, player]) {
-    if (!source) continue;
-    try {
-      if (source.runCommand(command).successCount > 0) return;
-    } catch {}
-  }
   try {
-    world.getDimension("minecraft:overworld").runCommand(command);
+    player.sendMessage(banText(ban));
   } catch {}
+
+  const index = CONFIG.ban.categories.indexOf(ban.category);
+  if (index < 0) {
+    scriptKick(player, ban);
+    return;
+  }
+  const dimension = player.dimension;
+  const location = { x: Math.floor(player.location.x), y: dimension.heightRange.min, z: Math.floor(player.location.z) };
+  const key = blockKey(dimension.id, location);
+  let saved;
+  try {
+    clearKickTags(player);
+    player.addTag(KICK_TAG + index);
+    saved = dimension.getBlock(location)?.permutation;
+    tempCommandBlocks.add(key);
+    world.structureManager.place(`mlc:kick_${index}`, dimension, location);
+  } catch {
+    tempCommandBlocks.delete(key);
+    scriptKick(player, ban);
+    return;
+  }
+  system.runTimeout(() => {
+    try {
+      if (saved) dimension.getBlock(location)?.setPermutation(saved);
+    } catch {}
+    tempCommandBlocks.delete(key);
+    if (player.isValid) {
+      // 커맨드 블록이 동작하지 않은 경우 (예: 커맨드 블록 꺼짐) 예전 방식으로라도 내보냄
+      clearKickTags(player);
+      scriptKick(player, ban);
+    }
+  }, 20);
 }
 
 // ban.useKick 이 false 일 때: kick 대신 "잠금" (접속은 되지만 못 움직이고 아무것도 못 하며 화면에 밴 이유가 계속 뜸).
@@ -157,7 +194,8 @@ world.beforeEvents.itemUse.subscribe((event) => {
   if (locked.has(event.source.id)) event.cancel = true;
 });
 
-world.afterEvents.playerSpawn.subscribe(({ player }) => {
+world.afterEvents.playerSpawn.subscribe(({ player, initialSpawn }) => {
+  if (initialSpawn) clearKickTags(player); // 지난번 kick 때 남은 태그 정리
   system.run(() => player.isValid && enforce(player));
 });
 

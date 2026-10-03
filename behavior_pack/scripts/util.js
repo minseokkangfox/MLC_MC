@@ -6,6 +6,9 @@ const ADMIN_NAMES = new Set(CONFIG.admins.map(normalize));
 
 export const PREFIX = "§6[MLC]§r ";
 
+/** 밴 kick 용으로 잠깐 놓은 커맨드 블록 위치 (커맨드 블록 제거 기능이 지우지 않도록) */
+export const tempCommandBlocks = new Set();
+
 export function isAdmin(player) {
   try {
     return ADMIN_NAMES.has(normalize(player.name));
