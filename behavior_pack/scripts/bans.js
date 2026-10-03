@@ -8,7 +8,6 @@ import { startRollback } from "./activity.js";
 
 const BAN_PREFIX = "mlc:ban:";
 const ROLLBACK_CATEGORY = "테러";
-const KICK_DELAY_TICKS = 200;
 
 const normalize = (name) => String(name).toLowerCase().replace(/\s+/g, "");
 
@@ -63,70 +62,20 @@ function kick(player, ban) {
   } catch {}
 }
 
-const pending = new Set(); // 밴 이유를 보여주고 내보내기를 기다리는 플레이어 id
-
-export function isBanPending(player) {
-  return pending.has(player.id);
-}
-
-/** 밴 이유를 화면/채팅/창으로 확실히 보여준 뒤 내보냄 */
-function removeBannedPlayer(player, ban) {
-  if (pending.has(player.id) || isAdmin(player)) return;
-  pending.add(player.id);
-  const id = player.id;
-  try {
-    for (const effect of ["blindness", "slowness", "mining_fatigue", "weakness"]) {
-      player.addEffect(effect, KICK_DELAY_TICKS + 100, { amplifier: 255, showParticles: false });
-    }
-    player.onScreenDisplay.setTitle("§c밴 당했습니다", { subtitle: `§f(${ban.category}) 위반`, fadeInDuration: 0, stayDuration: KICK_DELAY_TICKS, fadeOutDuration: 10 });
-    player.sendMessage(banText(ban));
-  } catch {}
-  let kicked = false;
-  const kickOnce = () => {
-    if (kicked) return;
-    kicked = true;
-    pending.delete(id);
-    if (player.isValid) kick(player, ban);
-  };
-  const form = new ActionFormData()
-    .title("§c서버 이용이 제한되었습니다")
-    .body(
-      `§c서버 규칙을 위반 했습니다.§r\n\n§e카테고리:§r ${ban.category}\n§e이유:§r ${ban.reason || "(없음)"}\n§e날짜:§r ${formatTime(ban.time)}\n\n` +
-        `이 밴에 문제가 있으면 관리자에게 문의하세요\n§b${CONFIG.ban.discord}`
-    )
-    .button("확인");
-  showForm(player, form)
-    .then(() => system.runTimeout(kickOnce, 20))
-    .catch(() => {});
-  system.runTimeout(kickOnce, KICK_DELAY_TICKS);
-}
-
-// 밴 당한 플레이어가 기다리는 동안 아무것도 못 하게
-world.beforeEvents.playerInteractWithBlock.subscribe((event) => {
-  if (pending.has(event.player.id)) event.cancel = true;
-});
-world.beforeEvents.playerBreakBlock.subscribe((event) => {
-  if (pending.has(event.player.id)) event.cancel = true;
-});
-world.beforeEvents.itemUse.subscribe((event) => {
-  if (pending.has(event.source.id)) event.cancel = true;
-});
-
-// 밴 당한 플레이어는 접속하면 이유를 보여주고 내보냄 (혹시 몰라 주기적으로도 확인)
-world.afterEvents.playerSpawn.subscribe(({ player, initialSpawn }) => {
-  if (!initialSpawn) return;
+// 밴 당한 플레이어는 바로 내보냄 (내보낼 때 이유가 나가는 화면에 표시됨). 혹시 몰라 주기적으로도 확인
+function kickIfBanned(player) {
+  if (isAdmin(player)) return;
   const ban = findBan(player);
-  if (ban) removeBannedPlayer(player, ban);
+  if (ban) kick(player, ban);
+}
+
+world.afterEvents.playerSpawn.subscribe(({ player, initialSpawn }) => {
+  if (initialSpawn) system.run(() => player.isValid && kickIfBanned(player));
 });
 
 system.runInterval(() => {
-  for (const player of world.getAllPlayers()) {
-    const ban = findBan(player);
-    if (ban) removeBannedPlayer(player, ban);
-  }
-}, 100);
-
-world.afterEvents.playerLeave.subscribe(({ playerId }) => pending.delete(playerId));
+  for (const player of world.getAllPlayers()) kickIfBanned(player);
+}, 40);
 
 export function banPlayer(admin, target, category, reason) {
   const ban = {
@@ -145,7 +94,7 @@ export function banPlayer(admin, target, category, reason) {
     message += `\n최근 ${CONFIG.rollback.hours}시간 행동 ${count}개를 되돌립니다.`;
   }
   const online = findOnlinePlayer(target.id);
-  if (online) removeBannedPlayer(online, ban);
+  if (online) kick(online, ban);
   admin.sendMessage(PREFIX + message);
 }
 
