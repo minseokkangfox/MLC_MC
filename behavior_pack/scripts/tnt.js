@@ -22,6 +22,8 @@ const NEIGHBORS = [
 const ignitions = new Map(); // blockKey -> { playerId, tick }
 const cartPlacements = []; // { dimensionId, location, playerId, tick }
 const entityOwners = new Map(); // entity id -> player id (다이나믹 프로퍼티 백업)
+// 폭발에 맞아 연쇄로 불붙을 TNT: 터진 TNT 주인을 물려받음 (불붙은 TNT는 폭발에 밀려 날아가서 위치로는 못 찾음)
+const chainPrimed = []; // { dimensionId, x, y, z, owner, tick }
 
 function tagOwner(entity, playerId) {
   if (!playerId) return;
@@ -74,7 +76,7 @@ world.afterEvents.entitySpawn.subscribe(({ entity }) => {
     ignitions.delete(key);
     let owner;
     if (ignition && system.currentTick - ignition.tick < 40) owner = ignition.playerId;
-    owner ??= getBlockOwner(dimension.id, location) ?? dispenserOwner(dimension, location);
+    owner ??= chainOwner(dimension.id, location) ?? getBlockOwner(dimension.id, location) ?? dispenserOwner(dimension, location);
     clearBlockOwner(dimension.id, location);
     tagOwner(entity, owner);
   } else if (entity.typeId === "minecraft:tnt_minecart") {
@@ -100,6 +102,21 @@ world.afterEvents.entitySpawn.subscribe(({ entity }) => {
     }, 2);
   }
 });
+
+function chainOwner(dimensionId, location) {
+  const now = system.currentTick;
+  let best;
+  let bestDistance = 25; // 5칸 이내
+  for (const c of chainPrimed) {
+    if (c.dimensionId !== dimensionId || now - c.tick > 20) continue;
+    const d = (c.x - location.x) ** 2 + (c.y - location.y) ** 2 + (c.z - location.z) ** 2;
+    if (d < bestDistance) {
+      bestDistance = d;
+      best = c.owner;
+    }
+  }
+  return best;
+}
 
 /** TNT / TNT 카트를 터트린 플레이어 id */
 export function explosiveOwner(source) {
@@ -137,6 +154,16 @@ world.beforeEvents.explosion.subscribe((event) => {
     return true;
   });
   if (allowed.length !== blocks.length) event.setImpactedBlocks(allowed);
+  if (owner) {
+    const now = system.currentTick;
+    for (const block of allowed) {
+      if (block.typeId !== "minecraft:tnt") continue;
+      const { x, y, z } = block.location;
+      chainPrimed.push({ dimensionId, x: x + 0.5, y, z: z + 0.5, owner, tick: now });
+    }
+    while (chainPrimed.length > 0 && now - chainPrimed[0].tick > 40) chainPrimed.shift();
+    if (chainPrimed.length > 500) chainPrimed.splice(0, chainPrimed.length - 500);
+  }
 });
 
 world.afterEvents.entityRemove.subscribe(({ removedEntityId }) => {

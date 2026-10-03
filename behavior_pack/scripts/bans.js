@@ -55,16 +55,30 @@ function banText(ban) {
   return `§c서버 규칙을 위반 했습니다.§r (${ban.category}) 를 위반${reason} §7이 밴에 문제가 있으면 관리자에게 문의하세요 §b${CONFIG.ban.discord}`;
 }
 
+// 스크립트가 서버(호스트) 이름으로 /kick 을 실행하면 "호스트에 의해 차단" 으로 처리되어
+// 렐름이 다시 켜질 때까지 못 들어오는 것으로 보임. 관리자가 직접 /kick 하는 것처럼
+// 플레이어(접속 중인 관리자, 없으면 밴 당한 본인)를 명령어 실행 주체로 해서 kick.
+const lastKick = new Map(); // 플레이어 id -> 틱 (같은 사람을 연달아 여러 번 kick 하지 않도록)
+
 function kick(player, ban) {
+  const now = system.currentTick;
+  if (now - (lastKick.get(player.id) ?? -1000) < 40) return;
+  lastKick.set(player.id, now);
   const name = player.name.replace(/"/g, "");
+  const command = `kick "${name}" ${banText(ban)}`;
+  const admin = world.getAllPlayers().find((p) => isAdmin(p));
+  for (const source of [admin, player]) {
+    if (!source) continue;
+    try {
+      if (source.runCommand(command).successCount > 0) return;
+    } catch {}
+  }
   try {
-    world.getDimension("minecraft:overworld").runCommand(`kick "${name}" ${banText(ban)}`);
+    world.getDimension("minecraft:overworld").runCommand(command);
   } catch {}
 }
 
-// 주의: 마인크래프트는 /kick 당한 플레이어를 그 세션(렐름이 다시 켜질 때까지) 동안 다시 못 들어오게 막습니다.
-// ("호스트에 의해 차단되었습니다" 화면). 그러면 밴 이유도 못 보고 /밴해제 로도 안 풀리기 때문에,
-// 기본값은 kick 대신 "잠금": 접속은 되지만 못 움직이고 아무것도 못 하며 화면에 밴 이유가 계속 뜸.
+// ban.useKick 이 false 일 때: kick 대신 "잠금" (접속은 되지만 못 움직이고 아무것도 못 하며 화면에 밴 이유가 계속 뜸).
 // 밴을 풀면 바로 원래 자리로 돌아가 다시 플레이할 수 있음.
 const JAIL_PREFIX = "mlc:jail:";
 const LOCK_EFFECTS = ["blindness", "invisibility", "resistance", "slowness", "mining_fatigue", "weakness"];
@@ -239,11 +253,7 @@ export async function openUnbanMenu(admin) {
       unbanPlayer(ban);
       const online = findOnlinePlayer(ban.id) ?? world.getAllPlayers().find((p) => normalize(p.name) === normalize(ban.name));
       if (online) enforce(online);
-      admin.sendMessage(
-        PREFIX +
-          `§e${ban.name}§r 의 밴을 해제했습니다.` +
-          (CONFIG.ban.useKick ? "\n§7이미 kick 당한 경우 렐름이 한 번 꺼졌다 켜진 뒤(모두 나가면 자동)부터 들어올 수 있습니다." : "")
-      );
+      admin.sendMessage(PREFIX + `§e${ban.name}§r 의 밴을 해제했습니다.`);
       return;
     }
   }
