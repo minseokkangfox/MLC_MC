@@ -1,0 +1,13 @@
+## 기본 접속/퇴장 메시지 숨김 (MLC 애드온이 같은 문구를 대신 보냄)
+multiplayer.player.joined=§r
+multiplayer.player.joined.renamed=§r
+multiplayer.player.joined.realms=§r
+multiplayer.player.joined.realms.renamed=§r
+multiplayer.player.left=§r
+multiplayer.player.left.realms=§r
+
+## MLC 애드온이 보내는 접속/퇴장 메시지
+mlc.player.joined=%s님이 게임에 참여했습니다
+mlc.player.joined.realms=%s님이 Realm에 참여했습니다
+mlc.player.left=%s님이 게임을 떠났습니다
+mlc.player.left.realms=%s님이 Realm을 떠났습니다

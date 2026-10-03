@@ -11,12 +11,14 @@ import { isForceSurvival, setForceSurvival } from "./gamemode.js";
 import { getRemovalLog, requestUrgentScan } from "./cmdblock.js";
 import { openReportInbox, openReportMenu } from "./reports.js";
 import { openBanMenu, openUnbanMenu } from "./bans.js";
+import { hideAdmin, isSilent, revealAdmin } from "./joinleave.js";
 
 const HELP = [
   "§e/신고§r - 플레이어 신고 (누구나)",
   "§e/신고함§r - 신고 확인 (관리자)",
   "§e/밴§r, §e/밴해제§r - 밴 / 밴 해제 (관리자)",
   "§e/mlc 게임모드§r - 관리자 제외 모두 강제 서바이벌 + 커맨드 블록 제거 (다시 입력하면 해제)",
+  "§e/mlc 공개§r / §e/mlc 조용히§r - 접속 알리기 / 투명하게 숨기 (관리자)",
   "§e/mlc 상태§r, §e/mlc 스캔§r, §e/mlc 로그§r",
 ].join("\n");
 
@@ -77,6 +79,15 @@ function mlc(origin, action) {
           : "강제 서바이벌 §cOFF§r"
       );
     }
+    case "공개":
+    case "show":
+      if (!isSilent(player)) return ok("이미 공개 상태입니다.");
+      system.run(() => revealAdmin(player));
+      return ok("접속을 알렸습니다. (투명 해제)");
+    case "조용히":
+    case "hide":
+      system.run(() => hideAdmin(player));
+      return ok("조용히 모드: 투명 상태가 되고 나갈 때 퇴장 메시지가 안 뜹니다. (이미 뜬 접속 메시지는 지울 수 없음)");
     case "상태":
     case "status":
       return ok(

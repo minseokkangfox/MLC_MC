@@ -14,6 +14,7 @@ import { queueAdminNotice } from "./inbox.js";
 //   c: 상자 등 컨테이너 파괴 [.., 구조물id(내용물 포함 저장), 원래주인]
 //   s: 남의 상자를 열기 직전 내용물 [.., 구조물id, 블럭]  (훔쳐간 아이템 복구용)
 //   l: 액체  [.., 위치 두 곳 중 하나]
+//   w: 용암/물을 붓기 직전 주변 지형 [.., 구조물id, 시작x, 시작y, 시작z]  (용암+물로 생긴 돌 등 복구용)
 //   f: 불
 
 const LOG_PREFIX = "mlc:act:";
@@ -102,7 +103,7 @@ system.runInterval(() => {
 function deleteStructures(raw) {
   try {
     for (const entry of JSON.parse(String(raw))) {
-      if (entry[1] === "c" || entry[1] === "s") world.structureManager.delete(entry[6]);
+      if (entry[1] === "c" || entry[1] === "s" || entry[1] === "w") world.structureManager.delete(entry[6]);
     }
   } catch {}
 }
@@ -211,6 +212,71 @@ world.afterEvents.playerInteractWithBlock.subscribe(({ block, player }) => {
   }
 });
 
+// 용암/물을 붓기 직전 주변 지형을 저장해 두었다가, 되돌릴 때 용암·물 때문에 생긴 돌/조약돌/흑요석/현무암,
+// 흐르는 물·용암, 불에 탄 자리를 저장한 모습으로 복구
+const AREA = { horizontal: 8, below: 16, above: 4 };
+const areaSnapshots = new Map(); // 플레이어 id -> [{ dimensionId, x, y, z, time }]
+
+function snapshotArea(player, dimension, center) {
+  const now = Date.now();
+  const recent = (areaSnapshots.get(player.id) ?? []).filter((s) => now - s.time < 2 * 60 * 1000);
+  // 2분 안에 근처(6칸)에서 이미 저장했으면 그걸로 충분
+  if (recent.some((s) => s.dimensionId === dimension.id && Math.abs(s.x - center.x) <= 6 && Math.abs(s.y - center.y) <= 6 && Math.abs(s.z - center.z) <= 6)) {
+    areaSnapshots.set(player.id, recent);
+    return;
+  }
+  const { min, max } = dimension.heightRange;
+  const from = { x: center.x - AREA.horizontal, y: Math.max(min, center.y - AREA.below), z: center.z - AREA.horizontal };
+  const to = { x: center.x + AREA.horizontal, y: Math.min(max - 1, center.y + AREA.above), z: center.z + AREA.horizontal };
+  const id = `mlc:rb${now.toString(36)}${(structureSeq++).toString(36)}`;
+  try {
+    world.structureManager.createFromWorld(id, dimension, from, to, { includeEntities: false, saveMode: StructureSaveMode.World });
+    record(player.id, "w", dimension.id, center, id, from.x, from.y, from.z);
+    recent.push({ dimensionId: dimension.id, ...center, time: now });
+  } catch {}
+  areaSnapshots.set(player.id, recent);
+}
+
+const LIQUID_DAMAGE = new Set([
+  "minecraft:cobblestone",
+  "minecraft:stone",
+  "minecraft:obsidian",
+  "minecraft:basalt",
+  "minecraft:lava",
+  "minecraft:flowing_lava",
+  "minecraft:water",
+  "minecraft:flowing_water",
+  "minecraft:fire",
+  "minecraft:air",
+]);
+
+/** @returns {boolean} 처리 완료 여부 */
+function restoreArea(dimension, entry) {
+  const [, , , , , , structureId, ox, oy, oz] = entry;
+  const structure = world.structureManager.get(structureId);
+  if (!structure) return true;
+  const griefer = entry[entry.length - 1];
+  const { x: sx, y: sy, z: sz } = structure.size;
+  // 먼저 전부 로딩됐는지 확인
+  if (!dimension.getBlock({ x: ox, y: oy, z: oz }) || !dimension.getBlock({ x: ox + sx - 1, y: oy + sy - 1, z: oz + sz - 1 })) return false;
+  for (let dx = 0; dx < sx; dx++) {
+    for (let dy = 0; dy < sy; dy++) {
+      for (let dz = 0; dz < sz; dz++) {
+        const location = { x: ox + dx, y: oy + dy, z: oz + dz };
+        const block = dimension.getBlock(location);
+        if (!block || !LIQUID_DAMAGE.has(block.typeId)) continue;
+        const before = structure.getBlockPermutation({ x: dx, y: dy, z: dz });
+        if (!before || before.type.id === block.typeId) continue;
+        const owner = getBlockOwner(dimension.id, location);
+        if (owner !== undefined && owner !== griefer) continue; // 다른 사람이 나중에 놓은 블럭
+        block.setPermutation(before);
+      }
+    }
+  }
+  world.structureManager.delete(structureId);
+  return true;
+}
+
 function breakContainer(dimension, location, playerId) {
   const block = dimension.getBlock(location);
   if (!block || block.isAir) return;
@@ -262,6 +328,7 @@ world.afterEvents.playerInteractWithBlock.subscribe(({ beforeItemStack, block, b
   if (item.endsWith("_bucket")) {
     record(player.id, "l", dimensionId, block.location);
     record(player.id, "l", dimensionId, front);
+    snapshotArea(player, block.dimension, front);
   } else {
     record(player.id, "f", dimensionId, front);
   }
@@ -406,6 +473,12 @@ function undo(entry) {
         world.structureManager.delete(structureId);
         break;
       }
+      case "w":
+        try {
+          return restoreArea(dimension, entry);
+        } catch {
+          return false;
+        }
       case "b":
       case "x":
         restore(block, entry);

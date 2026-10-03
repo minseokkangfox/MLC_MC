@@ -39,6 +39,10 @@ function findBan(player) {
   return undefined;
 }
 
+export function isBanned(player) {
+  return findBan(player) !== undefined;
+}
+
 /** 같은 id 또는 같은 이름으로 저장된 밴을 전부 삭제 */
 export function unbanPlayer(ban) {
   const name = normalize(ban.name);
@@ -62,6 +66,7 @@ function banText(ban) {
 // 구조물 파일은 tools/make_kick_structures.py 로 만듦.
 const lastKick = new Map(); // 플레이어 id -> 틱 (같은 사람을 연달아 여러 번 kick 하지 않도록)
 const KICK_TAG = "mlc_kick_";
+let commandOutputRestore; // kick 하는 동안 꺼둔 commandblockoutput 원래 값
 
 function scriptKick(player, ban) {
   const name = player.name.replace(/"/g, "");
@@ -96,7 +101,15 @@ function kick(player, ban) {
     player.addTag(KICK_TAG + index);
     saved = dimension.getBlock(location)?.permutation;
     tempCommandBlocks.add(key);
+    // 커맨드 블록 실행 결과("~님을 추방했습니다")가 채팅에 뜨지 않게 잠깐 끔 (관리자에게는 따로 알림)
+    if (commandOutputRestore === undefined) {
+      commandOutputRestore = world.gameRules.commandBlockOutput;
+      world.gameRules.commandBlockOutput = false;
+    }
     world.structureManager.place(`mlc:kick_${index}`, dimension, location);
+    for (const admin of world.getAllPlayers()) {
+      if (isAdmin(admin)) admin.sendMessage(PREFIX + `§7밴 당한 §e${player.name}§7 을(를) 내보냈습니다. (${ban.category})`);
+    }
   } catch {
     tempCommandBlocks.delete(key);
     scriptKick(player, ban);
@@ -107,6 +120,10 @@ function kick(player, ban) {
       if (saved) dimension.getBlock(location)?.setPermutation(saved);
     } catch {}
     tempCommandBlocks.delete(key);
+    if (tempCommandBlocks.size === 0 && commandOutputRestore !== undefined) {
+      world.gameRules.commandBlockOutput = commandOutputRestore;
+      commandOutputRestore = undefined;
+    }
     if (player.isValid) {
       // 커맨드 블록이 동작하지 않은 경우 (예: 커맨드 블록 꺼짐) 예전 방식으로라도 내보냄
       clearKickTags(player);

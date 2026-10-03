@@ -2,7 +2,7 @@
 // 숫자를 바꾼 뒤 팩을 다시 만들어 적용하면 됩니다.
 
 // 렐름에 새 버전이 제대로 적용됐는지 /mlc 상태 와 관리자 접속 알림에서 확인할 수 있음
-export const VERSION = "1.7.0";
+export const VERSION = "1.8.0";
 
 export const CONFIG = {
   // 관리자 게이머태그 (대소문자/띄어쓰기 무시하고 비교)
@@ -54,6 +54,11 @@ export const CONFIG = {
     // "테러" 로 밴하면 최근 행동을 되돌림
     // 카테고리나 discord 를 바꾸면 tools/make_kick_structures.py 도 똑같이 바꾸고 다시 실행해야 kick 메시지가 바뀜
     categories: ["핵", "악용", "괴롭힘", "욕설", "테러", "사기", "도배", "기타"],
+  },
+
+  joinMessage: {
+    // 접속/퇴장 메시지 문구. true: "~님이 Realm에 참여했습니다" (렐름), false: "~님이 게임에 참여했습니다"
+    realms: true,
   },
 
   report: {
