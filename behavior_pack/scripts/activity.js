@@ -12,6 +12,7 @@ import { queueAdminNotice } from "./inbox.js";
 //   b: 파괴  [.., 블럭, 상태, 원래주인]
 //   x: 폭발  [.., 블럭, 상태, 원래주인]   (그 플레이어의 TNT로 부서진 블럭)
 //   c: 상자 등 컨테이너 파괴 [.., 구조물id(내용물 포함 저장), 원래주인]
+//   s: 남의 상자를 열기 직전 내용물 [.., 구조물id, 블럭]  (훔쳐간 아이템 복구용)
 //   l: 액체  [.., 위치 두 곳 중 하나]
 //   f: 불
 
@@ -101,7 +102,7 @@ system.runInterval(() => {
 function deleteStructures(raw) {
   try {
     for (const entry of JSON.parse(String(raw))) {
-      if (entry[1] === "c") world.structureManager.delete(entry[6]);
+      if (entry[1] === "c" || entry[1] === "s") world.structureManager.delete(entry[6]);
     }
   } catch {}
 }
@@ -174,6 +175,40 @@ world.beforeEvents.playerBreakBlock.subscribe((event) => {
   const location = { ...block.location };
   const playerId = player.id;
   system.run(() => breakContainer(dimension, location, playerId));
+});
+
+// 남의 상자/통 등을 열면, 열기 직전 내용물을 저장 (테러로 밴하면 훔쳐간 아이템까지 원래대로)
+const snapshotTimes = new Map(); // "플레이어|위치" -> 마지막 저장 시각
+world.afterEvents.playerInteractWithBlock.subscribe(({ block, player }) => {
+  let isContainer = false;
+  try {
+    isContainer = !!block.getComponent("minecraft:inventory");
+  } catch {}
+  if (!isContainer) return;
+  const dimension = block.dimension;
+  const targets = [{ ...block.location }];
+  // 큰 상자는 옆 칸도 같이
+  for (const [dx, dy, dz] of HORIZONTAL) {
+    const pos = { x: block.location.x + dx, y: block.location.y + dy, z: block.location.z + dz };
+    try {
+      if (dimension.getBlock(pos)?.typeId === block.typeId && block.typeId.includes("chest")) targets.push(pos);
+    } catch {}
+  }
+  for (const location of targets) {
+    if (getBlockOwner(dimension.id, location) === player.id) continue; // 자기 상자는 저장 안 함
+    const key = `${player.id}|${dimension.id}|${location.x}|${location.y}|${location.z}`;
+    const last = snapshotTimes.get(key);
+    if (last !== undefined && Date.now() - last < windowMs()) continue; // 가장 처음 상태만 있으면 됨
+    snapshotTimes.set(key, Date.now());
+    const id = `mlc:rb${Date.now().toString(36)}${(structureSeq++).toString(36)}`;
+    try {
+      world.structureManager.createFromWorld(id, dimension, location, location, {
+        includeEntities: false,
+        saveMode: StructureSaveMode.World,
+      });
+      record(player.id, "s", dimension.id, location, id, dimension.getBlock(location)?.typeId ?? "");
+    } catch {}
+  }
 });
 
 function breakContainer(dimension, location, playerId) {
@@ -261,7 +296,11 @@ export function startRollback(playerId, playerName) {
   }
   // 최근 행동부터 거꾸로 되돌림
   entries.sort((a, b) => b[0] - a[0]);
-  for (const entry of entries) if (entry[1] === "p") entry[7] = playerId;
+  // 되돌릴 때 "다른 사람이 나중에 지은 블럭" 은 건드리지 않도록 누구의 기록인지 끝에 붙임
+  for (const entry of entries) {
+    if (entry[1] === "p") entry[7] = playerId;
+    else entry.push(playerId);
+  }
   chunkEntries(entries).forEach((chunk, i) => {
     const key = `${QUEUE_PREFIX}${Date.now()}-${String(i).padStart(5, "0")}`;
     world.setDynamicProperty(key, JSON.stringify(chunk));
@@ -271,9 +310,13 @@ export function startRollback(playerId, playerName) {
   return entries.length;
 }
 
-const isReplaceable = (block) =>
-  block.isAir || block.isLiquid || block.typeId === "minecraft:fire" || block.typeId === "minecraft:soul_fire" ||
-  block.typeId === "minecraft:cobblestone" || block.typeId === "minecraft:obsidian";
+/** 복구해도 되는 자리인지: 다른 사람이 나중에 설치한 블럭만 아니면 덮어씀
+ *  (그 사이 생긴 풀, 떨어진 모래/자갈, 흘러든 물, 용암으로 생긴 조약돌 등은 덮어씀) */
+function canOverwrite(block, entry) {
+  if (block.isAir || block.isLiquid) return true;
+  const owner = getBlockOwner(block.dimension.id, block.location);
+  return owner === undefined || owner === entry[entry.length - 1];
+}
 
 const FLOWING = ["minecraft:flowing_lava", "minecraft:flowing_water"];
 const LAVA_LEFTOVERS = ["minecraft:cobblestone", "minecraft:obsidian"];
@@ -305,7 +348,7 @@ function touchesLiquid(dimension, location) {
 
 function restore(block, entry) {
   const [, , , , , , typeId, states, previousOwner] = entry;
-  if (!isReplaceable(block)) return;
+  if (!canOverwrite(block, entry)) return;
   let permutation;
   try {
     permutation = BlockPermutation.resolve(typeId, states);
@@ -340,13 +383,25 @@ function undo(entry) {
       }
       case "c": {
         const [, , , , , , structureId, previousOwner] = entry;
-        if (isReplaceable(block)) {
+        if (canOverwrite(block, entry)) {
           try {
             world.structureManager.place(structureId, dimension, { x, y, z }, { includeEntities: false });
           } catch {
             return false;
           }
           if (previousOwner) setBlockOwner(dimension.id, block.location, previousOwner);
+        }
+        world.structureManager.delete(structureId);
+        break;
+      }
+      case "s": {
+        const [, , , , , , structureId, containerType] = entry;
+        if (block.typeId === containerType || canOverwrite(block, entry)) {
+          try {
+            world.structureManager.place(structureId, dimension, { x, y, z }, { includeEntities: false });
+          } catch {
+            return false;
+          }
         }
         world.structureManager.delete(structureId);
         break;

@@ -125,6 +125,10 @@ world.beforeEvents.explosion.subscribe((event) => {
   const allowed = blocks.filter((block) => {
     const { x, y, z } = block.location;
     if (!mine(getBlockOwnerIndex(dimensionId, block.location))) return false;
+    // 상자/통/화로 등 컨테이너는 TNT로 절대 안 터짐 (애드온 설치 전에 놓은 상자도 보호)
+    try {
+      if (block.getComponent("minecraft:inventory")) return false;
+    } catch {}
     // 다른 사람 블럭(문, 침대, 횃불, 레일 등)을 받치고 있는 블럭도 지켜서 같이 떨어지지 않게
     for (const offset of NEIGHBORS) {
       const neighbor = { x: x + offset.x, y: y + offset.y, z: z + offset.z };

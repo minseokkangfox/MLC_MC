@@ -23,6 +23,10 @@ function looksBrandNew(player) {
   if (player.dimension.id !== "minecraft:overworld") return false;
   if (dx * dx + dz * dz > radius * radius) return false;
   if (player.level > 0) return false;
+  // 스폰 지점(침대 또는 이 애드온이 정해준 곳)이 있으면 이미 플레이한 사람
+  try {
+    if (player.getSpawnPoint()) return false;
+  } catch {}
   const inventory = player.getComponent("minecraft:inventory")?.container;
   if (inventory && inventory.emptySlotsCount !== inventory.size) return false;
   const equipment = player.getComponent("minecraft:equippable");

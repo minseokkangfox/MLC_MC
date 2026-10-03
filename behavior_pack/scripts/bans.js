@@ -239,7 +239,11 @@ export async function openUnbanMenu(admin) {
       unbanPlayer(ban);
       const online = findOnlinePlayer(ban.id) ?? world.getAllPlayers().find((p) => normalize(p.name) === normalize(ban.name));
       if (online) enforce(online);
-      admin.sendMessage(PREFIX + `§e${ban.name}§r 의 밴을 해제했습니다.`);
+      admin.sendMessage(
+        PREFIX +
+          `§e${ban.name}§r 의 밴을 해제했습니다.` +
+          (CONFIG.ban.useKick ? "\n§7이미 kick 당한 경우 렐름이 한 번 꺼졌다 켜진 뒤(모두 나가면 자동)부터 들어올 수 있습니다." : "")
+      );
       return;
     }
   }
