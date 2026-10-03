@@ -207,6 +207,9 @@ world.afterEvents.playerBreakBlock.subscribe(({ block, brokenBlockPermutation, d
 });
 
 world.afterEvents.blockExplode.subscribe(({ block, dimension, explodedBlockPermutation, source }) => {
+  // 폭발에 맞은 TNT는 연쇄로 터짐: 주인 기록을 남겨둬야 그 TNT도 같은 사람 것으로 기록됨 (tnt.js 에서 정리)
+  // 또 되돌릴 때 TNT를 다시 놓으면 안 되므로 기록하지 않음
+  if (explodedBlockPermutation.type.id === "minecraft:tnt") return;
   const previousOwner = getBlockOwner(dimension.id, block.location) ?? 0;
   clearBlockOwner(dimension.id, block.location);
   const owner = explosiveOwner(source);

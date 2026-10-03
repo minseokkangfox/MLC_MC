@@ -1,5 +1,6 @@
 import { system, world } from "@minecraft/server";
 import { PREFIX, isAdmin } from "./util.js";
+import { VERSION } from "./config.js";
 
 // 관리자가 접속했을 때만 보여줄 메시지 보관함
 const KEY = "mlc:adminInbox";
@@ -37,7 +38,7 @@ function showInbox(player) {
     for (const message of list) lines.push(" §7- §r" + message);
     world.setDynamicProperty(KEY, undefined);
   }
-  if (lines.length > 0) player.sendMessage(PREFIX + "관리자 알림\n" + lines.join("\n"));
+  player.sendMessage(PREFIX + `§7v${VERSION} 작동 중` + (lines.length > 0 ? "\n관리자 알림\n" + lines.join("\n") : ""));
 }
 
 world.afterEvents.playerSpawn.subscribe(({ player, initialSpawn }) => {

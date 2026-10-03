@@ -1,4 +1,4 @@
-import { system, world } from "@minecraft/server";
+import { InputPermissionCategory, system, world } from "@minecraft/server";
 import { ActionFormData, ModalFormData } from "@minecraft/server-ui";
 import { CONFIG } from "./config.js";
 import { PREFIX, isAdmin } from "./util.js";
@@ -62,20 +62,100 @@ function kick(player, ban) {
   } catch {}
 }
 
-// 밴 당한 플레이어는 바로 내보냄 (내보낼 때 이유가 나가는 화면에 표시됨). 혹시 몰라 주기적으로도 확인
-function kickIfBanned(player) {
-  if (isAdmin(player)) return;
-  const ban = findBan(player);
-  if (ban) kick(player, ban);
+// 주의: 마인크래프트는 /kick 당한 플레이어를 그 세션(렐름이 다시 켜질 때까지) 동안 다시 못 들어오게 막습니다.
+// ("호스트에 의해 차단되었습니다" 화면). 그러면 밴 이유도 못 보고 /밴해제 로도 안 풀리기 때문에,
+// 기본값은 kick 대신 "잠금": 접속은 되지만 못 움직이고 아무것도 못 하며 화면에 밴 이유가 계속 뜸.
+// 밴을 풀면 바로 원래 자리로 돌아가 다시 플레이할 수 있음.
+const JAIL_PREFIX = "mlc:jail:";
+const LOCK_EFFECTS = ["blindness", "invisibility", "resistance", "slowness", "mining_fatigue", "weakness"];
+const locked = new Set();
+
+function lock(player, ban) {
+  if (!locked.has(player.id)) {
+    locked.add(player.id);
+    if (world.getDynamicProperty(JAIL_PREFIX + player.id) === undefined) {
+      const { x, y, z } = player.location;
+      world.setDynamicProperty(JAIL_PREFIX + player.id, JSON.stringify({ dimension: player.dimension.id, x, y, z }));
+    }
+    player.sendMessage(banText(ban));
+  }
+  try {
+    player.inputPermissions.setPermissionCategory(InputPermissionCategory.Movement, false);
+  } catch {}
+  for (const effect of LOCK_EFFECTS) {
+    try {
+      player.addEffect(effect, 200, { amplifier: 255, showParticles: false });
+    } catch {}
+  }
+  const reason = ban.reason ? ` (${ban.reason})` : "";
+  player.onScreenDisplay.setTitle("§c서버 규칙을 위반 했습니다", {
+    subtitle: `§f(${ban.category}) 를 위반${reason}`,
+    fadeInDuration: 0,
+    stayDuration: 100,
+    fadeOutDuration: 0,
+  });
+  player.onScreenDisplay.setActionBar(`§7이 밴에 문제가 있으면 관리자에게 문의하세요 §b${CONFIG.ban.discord}`);
 }
 
-world.afterEvents.playerSpawn.subscribe(({ player, initialSpawn }) => {
-  if (initialSpawn) system.run(() => player.isValid && kickIfBanned(player));
+function release(player) {
+  locked.delete(player.id);
+  try {
+    player.inputPermissions.setPermissionCategory(InputPermissionCategory.Movement, true);
+  } catch {}
+  for (const effect of LOCK_EFFECTS) {
+    try {
+      player.removeEffect(effect);
+    } catch {}
+  }
+  try {
+    player.runCommand("title @s clear");
+  } catch {}
+  try {
+    const saved = JSON.parse(String(world.getDynamicProperty(JAIL_PREFIX + player.id)));
+    player.teleport({ x: saved.x, y: saved.y, z: saved.z }, { dimension: world.getDimension(saved.dimension) });
+  } catch {}
+  world.setDynamicProperty(JAIL_PREFIX + player.id, undefined);
+  player.sendMessage(PREFIX + "§a밴이 해제되었습니다. 다시 플레이할 수 있습니다.");
+}
+
+function enforce(player) {
+  if (isAdmin(player)) return;
+  const ban = findBan(player);
+  if (ban) {
+    if (CONFIG.ban.useKick) kick(player, ban);
+    else lock(player, ban);
+  } else if (locked.has(player.id) || world.getDynamicProperty(JAIL_PREFIX + player.id) !== undefined) {
+    release(player);
+  }
+}
+
+// 잠긴 플레이어는 블럭/아이템/엔티티 상호작용 전부 막음
+world.beforeEvents.playerInteractWithBlock.subscribe((event) => {
+  if (locked.has(event.player.id)) event.cancel = true;
+});
+world.beforeEvents.playerInteractWithEntity.subscribe((event) => {
+  if (locked.has(event.player.id)) event.cancel = true;
+});
+world.beforeEvents.playerBreakBlock.subscribe((event) => {
+  if (locked.has(event.player.id)) event.cancel = true;
+});
+world.beforeEvents.itemUse.subscribe((event) => {
+  if (locked.has(event.source.id)) event.cancel = true;
+});
+
+world.afterEvents.playerSpawn.subscribe(({ player }) => {
+  system.run(() => player.isValid && enforce(player));
 });
 
 system.runInterval(() => {
-  for (const player of world.getAllPlayers()) kickIfBanned(player);
+  for (const player of world.getAllPlayers()) {
+    try {
+      enforce(player);
+    } catch {}
+  }
 }, 40);
+
+world.afterEvents.playerLeave.subscribe(({ playerId }) => locked.delete(playerId));
 
 export function banPlayer(admin, target, category, reason) {
   const ban = {
@@ -94,7 +174,7 @@ export function banPlayer(admin, target, category, reason) {
     message += `\n최근 ${CONFIG.rollback.hours}시간 행동 ${count}개를 되돌립니다.`;
   }
   const online = findOnlinePlayer(target.id);
-  if (online) kick(online, ban);
+  if (online) enforce(online);
   admin.sendMessage(PREFIX + message);
 }
 
@@ -157,6 +237,8 @@ export async function openUnbanMenu(admin) {
     if (!action || action.canceled) return;
     if (action.selection === 0) {
       unbanPlayer(ban);
+      const online = findOnlinePlayer(ban.id) ?? world.getAllPlayers().find((p) => normalize(p.name) === normalize(ban.name));
+      if (online) enforce(online);
       admin.sendMessage(PREFIX + `§e${ban.name}§r 의 밴을 해제했습니다.`);
       return;
     }

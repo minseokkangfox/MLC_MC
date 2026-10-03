@@ -36,9 +36,12 @@ function looksBrandNew(player) {
 
 // 플레이어별 상태는 월드에 저장 (플레이어 데이터보다 확실함)
 //   없음 = 아직 판단 안 함, "done" = 끝남(다시는 안 옮김), {x,z} = 옮기는 중
+// id 와 이름 둘 다로 저장 (렐름에서 id 가 바뀌어도 이름으로 알아봄)
 const stateKey = (player) => `mlc:sp:${player.id}`;
+const nameKey = (player) => `mlc:spn:${player.name.toLowerCase().replace(/\s+/g, "")}`;
 
 function getState(player) {
+  if (world.getDynamicProperty(nameKey(player)) === "done") return "done";
   const raw = world.getDynamicProperty(stateKey(player));
   if (raw === "done") return "done";
   if (typeof raw === "string") {
@@ -51,6 +54,7 @@ function getState(player) {
 
 function setState(player, state) {
   world.setDynamicProperty(stateKey(player), state === "done" ? "done" : JSON.stringify(state));
+  if (state === "done") world.setDynamicProperty(nameKey(player), "done");
 }
 
 function pickTarget() {
@@ -150,20 +154,20 @@ world.afterEvents.playerSpawn.subscribe(({ player, initialSpawn }) => {
     let state = getState(player);
     if (state === "done") return;
 
-    // 이전 버전 기록 이어받기
-    if (state === undefined && player.getDynamicProperty(PENDING_KEY) === true) state = { resume: true };
+    // 이전 버전 기록이 있으면 (옮기던 중이었어도) 더는 옮기지 않음
+    if (state === undefined && player.getDynamicProperty(PENDING_KEY) === true) {
+      finishWhenLanded(player);
+      return;
+    }
     if (state === undefined && player.getDynamicProperty(KNOWN_KEY) === true) {
       setState(player, "done");
       return;
     }
 
     if (state !== undefined) {
-      // 옮기던 중에 나갔던 플레이어: 이미 멀리 와 있으면 그대로 끝, 아니면 같은 목적지로 이어서
-      if (farFromWorldSpawn(player)) {
-        finishWhenLanded(player);
-      } else {
-        relocate(player, typeof state.x === "number" ? state : pickTarget());
-      }
+      // 옮기던 중에 나갔던 플레이어: 이미 멀리 와 있으면 그대로 끝, 아니면 같은 목적지로 이어서 (새 랜덤 위치는 절대 안 뽑음)
+      if (farFromWorldSpawn(player) || typeof state.x !== "number") finishWhenLanded(player);
+      else relocate(player, state);
       return;
     }
 
