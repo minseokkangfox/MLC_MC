@@ -101,15 +101,22 @@ world.afterEvents.entitySpawn.subscribe(({ entity }) => {
   }
 });
 
-world.beforeEvents.explosion.subscribe((event) => {
-  if (!CONFIG.tnt.enabled) return;
-  const source = event.source;
-  if (!source || !EXPLOSIVES.has(source.typeId)) return;
+/** TNT / TNT 카트를 터트린 플레이어 id */
+export function explosiveOwner(source) {
+  if (!source) return undefined;
   let owner;
   try {
     owner = source.getDynamicProperty(OWNER_KEY);
   } catch {}
   owner ??= entityOwners.get(source.id);
+  return typeof owner === "string" ? owner : undefined;
+}
+
+world.beforeEvents.explosion.subscribe((event) => {
+  if (!CONFIG.tnt.enabled) return;
+  const source = event.source;
+  if (!source || !EXPLOSIVES.has(source.typeId)) return;
+  const owner = explosiveOwner(source);
   const ownerIndex = typeof owner === "string" ? getOwnerIndex(owner) : undefined;
   const dimensionId = event.dimension.id;
 

@@ -1,6 +1,6 @@
 import { EquipmentSlot, system, world } from "@minecraft/server";
 import { CONFIG } from "./config.js";
-import { PREFIX, formatLocation, isAdmin, notifyAdmins } from "./util.js";
+import { PREFIX, isAdmin } from "./util.js";
 
 const KNOWN_KEY = "mlc:known";
 const PENDING_KEY = "mlc:pendingRelocate";
@@ -78,7 +78,6 @@ function relocate(player, attempt = 0) {
       player.removeEffect("resistance");
     }, 100);
     player.sendMessage(PREFIX + "§a환영합니다! 자원이 많은 곳에서 시작합니다. 이곳이 당신의 스폰 지점입니다.");
-    notifyAdmins(`신규 플레이어 §e${player.name}§r 를 ${formatLocation(target)} 에 스폰시켰습니다.`);
   }, 10);
 }
 

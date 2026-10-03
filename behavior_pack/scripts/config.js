@@ -14,7 +14,7 @@ export const CONFIG = {
     // 강제 서바이벌 모드가 켜져 있을 때 커맨드 블록을 찾아서 제거
     remove: true,
     // 플레이어 주변 몇 청크까지 검사할지
-    scanChunkRadius: 6,
+    scanChunkRadius: 10,
     // 같은 청크를 다시 검사하기까지 걸리는 시간 (틱)
     rescanTicks: 20 * 60 * 5,
   },
@@ -31,12 +31,26 @@ export const CONFIG = {
   wither: {
     // 위더가 소환된 뒤 이 시간이 지나면 제거 (밀리초) - 2시간
     maxLifeMs: 2 * 60 * 60 * 1000,
-    checkIntervalTicks: 20 * 30,
   },
 
   tnt: {
     // TNT / TNT 카트는 자연 블럭 + 터트린 사람이 설치한 블럭만 부숨
     enabled: true,
+  },
+
+  rollback: {
+    // 테러로 밴하면 이 시간 동안의 행동을 전부 되돌림
+    hours: 5,
+  },
+
+  ban: {
+    discord: "https://discord.gg/s63XD2AuNy",
+    // "테러" 로 밴하면 최근 행동을 되돌림
+    categories: ["핵", "악용", "괴롭힘", "욕설", "테러", "사기", "도배", "기타"],
+  },
+
+  report: {
+    categories: ["테러", "욕설", "괴롭힘", "핵", "버그 악용", "사기", "도배", "기타"],
   },
 
   bookBan: {

@@ -131,15 +131,4 @@ function flush() {
 }
 
 system.runInterval(flush, 100);
-
-world.afterEvents.playerPlaceBlock.subscribe(({ block, player }) => {
-  setBlockOwner(block.dimension.id, block.location, player.id);
-});
-
-world.afterEvents.playerBreakBlock.subscribe(({ block, dimension }) => {
-  clearBlockOwner(dimension.id, block.location);
-});
-
-world.afterEvents.blockExplode.subscribe(({ block, dimension }) => {
-  clearBlockOwner(dimension.id, block.location);
-});
+// 블럭 설치/파괴/폭발 시 기록 갱신은 activity.js 에서 처리

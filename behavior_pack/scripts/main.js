@@ -1,8 +1,13 @@
 import "./commands.js";
+import "./players.js";
+import "./inbox.js";
 import "./gamemode.js";
 import "./cmdblock.js";
 import "./spawn.js";
 import "./wither.js";
 import "./ownership.js";
 import "./tnt.js";
+import "./activity.js";
 import "./bookban.js";
+import "./bans.js";
+import "./reports.js";

@@ -1,6 +1,6 @@
 import { GameMode, system, world } from "@minecraft/server";
 import { CONFIG } from "./config.js";
-import { formatLocation, isAdmin, notifyAdmins, shortDimension } from "./util.js";
+import { isAdmin } from "./util.js";
 import { requestUrgentScan } from "./cmdblock.js";
 
 const FORCE_KEY = "mlc:forceSurvival";
@@ -17,16 +17,13 @@ export function setForceSurvival(enabled) {
   world.setDynamicProperty(FORCE_KEY, enabled);
 }
 
-const lastWarn = new Map();
+let lastScanRequest = -1000;
 
-function reportBlockedChange(player, toGameMode) {
+// 게임모드가 바뀌려 하면 근처 커맨드 블록을 즉시 다시 검사 (메시지는 띄우지 않음)
+function onBlockedChange() {
   const now = system.currentTick;
-  if (now - (lastWarn.get(player.name) ?? -1000) < 200) return;
-  lastWarn.set(player.name, now);
-  notifyAdmins(
-    `§e${player.name}§r 의 게임모드가 §c${toGameMode}§r(으)로 바뀌려던 것을 막았습니다. ` +
-      `위치: ${shortDimension(player.dimension.id)} ${formatLocation(player.location)} - 근처 커맨드 블록을 검사합니다.`
-  );
+  if (now - lastScanRequest < 200) return;
+  lastScanRequest = now;
   requestUrgentScan();
 }
 
@@ -35,10 +32,7 @@ world.beforeEvents.playerGameModeChange.subscribe((event) => {
   if (event.toGameMode === GameMode.Survival) return;
   if (!isForceSurvival() || isAdmin(event.player)) return;
   event.cancel = true;
-  const { player, toGameMode } = event;
-  system.run(() => {
-    if (player.isValid) reportBlockedChange(player, toGameMode);
-  });
+  system.run(onBlockedChange);
 });
 
 // 취소가 버그로 안 될 경우를 대비해 계속 서바이벌로 되돌림
@@ -50,7 +44,7 @@ system.runInterval(() => {
       const mode = player.getGameMode();
       if (mode !== GameMode.Survival) {
         player.setGameMode(GameMode.Survival);
-        reportBlockedChange(player, mode);
+        onBlockedChange();
       }
     } catch {
       // 플레이어가 막 나간 경우 등

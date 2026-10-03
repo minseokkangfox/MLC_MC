@@ -1,6 +1,7 @@
 import { BlockVolume, system, world } from "@minecraft/server";
 import { CONFIG } from "./config.js";
-import { formatLocation, notifyAdmins, shortDimension } from "./util.js";
+import { formatLocation, shortDimension } from "./util.js";
+import { queueAdminNotice } from "./inbox.js";
 import { isForceSurvival } from "./gamemode.js";
 
 // 게임모드를 바꾸는 명령어는 스크립트로 내용을 읽을 수 없어서,
@@ -72,9 +73,9 @@ function removeCommandBlock(dimension, location) {
   if (CONFIG.commandBlock.remove) {
     block.setType("minecraft:air");
     addLog({ type, where, time: Date.now() });
-    notifyAdmins(`§c커맨드 블록 제거§r: ${type} @ ${where}`);
+    queueAdminNotice(`§c커맨드 블록 제거§r: ${type} @ ${where}`);
   } else {
-    notifyAdmins(`§e커맨드 블록 발견§r: ${type} @ ${where}`);
+    queueAdminNotice(`§e커맨드 블록 발견§r: ${type} @ ${where}`);
   }
 }
 
@@ -105,8 +106,8 @@ system.runInterval(() => {
     return;
   }
   if (urgent || queue.length === 0) rebuildQueue();
-  // 한 틱에 두 청크씩 검사
-  for (let i = 0; i < 2 && queue.length > 0; i++) {
+  // 한 틱에 세 청크씩 검사
+  for (let i = 0; i < 3 && queue.length > 0; i++) {
     scanChunk(queue.shift());
   }
 }, 1);
@@ -124,7 +125,7 @@ system.runInterval(() => {
       try {
         cart.remove();
         addLog({ type: "command_block_minecart", where, time: Date.now() });
-        notifyAdmins(`§c커맨드 블록 마인카트 제거§r @ ${where}`);
+        queueAdminNotice(`§c커맨드 블록 마인카트 제거§r @ ${where}`);
       } catch {}
     }
   }

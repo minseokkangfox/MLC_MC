@@ -2,11 +2,11 @@
   "format_version": 2,
   "header": {
     "name": "MLC 렐름 관리 애드온",
-    "description": "게임모드 강제/커맨드블록 제거, 신규 스폰, 위더 제한, TNT 보호, 북밴 방지",
+    "description": "게임모드 강제/커맨드블록 제거, 신규 스폰, 위더 제한, TNT 보호, 북밴 방지, 신고/밴",
     "uuid": "39ec96ef-2de6-4de3-b4af-8e37d8a95bca",
     "version": [
       1,
-      0,
+      1,
       0
     ],
     "min_engine_version": [
@@ -23,7 +23,7 @@
       "entry": "scripts/main.js",
       "version": [
         1,
-        0,
+        1,
         0
       ]
     }
@@ -32,6 +32,10 @@
     {
       "module_name": "@minecraft/server",
       "version": "2.3.0"
+    },
+    {
+      "module_name": "@minecraft/server-ui",
+      "version": "2.0.0"
     }
   ]
 }
