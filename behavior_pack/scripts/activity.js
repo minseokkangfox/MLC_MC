@@ -162,14 +162,18 @@ function otherHalves(dimension, location) {
   return result;
 }
 
-// 상자/통/화로 등 컨테이너는 부수기 직전에 내용물째 구조물로 저장해 두었다가 되돌릴 때 그대로 복구
+// 상자/통/화로 등 컨테이너와 표지판·액자·현수막·침대 같은 "데이터가 있는 블럭"은
+// 부수기 직전에 통째로 구조물로 저장해 두었다가 되돌릴 때 그대로 복구 (내용물, 글씨, 액자 속 아이템, 색깔 등)
 let structureSeq = 0;
+const SPECIAL_BLOCK_WORDS = ["sign", "frame", "banner", "lectern", "jukebox", "chiseled_bookshelf", "decorated_pot", "flower_pot", "skull", "_head", "beehive", "bee_nest", "spawner", "campfire", "crafter", "note_block", "cauldron", "end_portal_frame"];
+const isSpecialBlock = (typeId) => SPECIAL_BLOCK_WORDS.some((w) => typeId.includes(w));
+
 world.beforeEvents.playerBreakBlock.subscribe((event) => {
   const { block, player } = event;
   if (event.cancel || block.typeId.endsWith("shulker_box")) return;
   let isContainer = false;
   try {
-    isContainer = !!block.getComponent("minecraft:inventory");
+    isContainer = !!block.getComponent("minecraft:inventory") || isSpecialBlock(block.typeId);
   } catch {}
   if (!isContainer) return;
   event.cancel = true;
@@ -277,8 +281,12 @@ function restoreArea(dimension, entry) {
         if (!block || !(LIQUID_DAMAGE.has(block.typeId) || isGravity(block.typeId))) continue;
         const before = structure.getBlockPermutation({ x: dx, y: dy, z: dz });
         if (!before || before.type.id === block.typeId || before.type.id === "minecraft:tnt") continue; // TNT 는 다시 놓지 않음
-        const owner = getBlockOwner(dimension.id, location);
-        if (owner !== undefined && owner !== griefer) continue; // 다른 사람이 나중에 놓은 블럭
+        // 지금 그 자리에 다른 사람이 나중에 놓은 블럭이 있으면 건드리지 않음
+        // (빈 칸/불/액체면 예전 주인 기록이 남아 있어도 탄 자리이므로 복구)
+        if (!block.isAir && !block.isLiquid && !block.typeId.includes("fire")) {
+          const owner = getBlockOwner(dimension.id, location);
+          if (owner !== undefined && owner !== griefer) continue;
+        }
         block.setPermutation(before);
       }
     }
@@ -343,6 +351,8 @@ world.afterEvents.playerInteractWithBlock.subscribe(({ beforeItemStack, block, b
   }
   // 용암·물이 흐르고 불이 번지기 전 주변 지형 저장
   snapshotArea(player.id, block.dimension, front, LIQUID_AREA);
+  // 불은 끝없이 번질 수 있어서, 번지는 불을 따라가며 그 앞쪽 지형을 계속 저장
+  startFireWatch(player.id, block.dimension, front);
 });
 
 // ---------- 되돌리기 ----------
@@ -430,6 +440,91 @@ function touchesLiquid(dimension, location) {
   return false;
 }
 
+// ---------- 번지는 불 따라가기 ----------
+// 8x8x8 칸 단위로 불이 있는지 계속 살펴보고, 불이 있는 칸의 주변 칸(26개)을 불이 닿기 전에 저장.
+// 되돌릴 때 저장해 둔 모습으로 탄 자리를 복구하므로, 기지 전체가 타도 복구됨.
+const CELL = 8;
+const FIRE_TYPES = ["minecraft:fire", "minecraft:soul_fire"];
+const MAX_CELLS = 4000;
+const fireWatches = []; // { playerId, dimension, cells: Map(키 -> {x,y,z,last}), saved: Set(키), start }
+
+const cellKey = (c) => `${c.x},${c.y},${c.z}`;
+
+function saveCell(watch, c) {
+  const key = cellKey(c);
+  if (watch.saved.has(key) || watch.saved.size >= MAX_CELLS) return;
+  const { min, max } = watch.dimension.heightRange;
+  const from = { x: c.x * CELL, y: Math.max(min, c.y * CELL), z: c.z * CELL };
+  const to = { x: c.x * CELL + CELL - 1, y: Math.min(max - 1, c.y * CELL + CELL - 1), z: c.z * CELL + CELL - 1 };
+  if (from.y > to.y) {
+    watch.saved.add(key);
+    return;
+  }
+  const id = `mlc:rb${Date.now().toString(36)}${(structureSeq++).toString(36)}`;
+  try {
+    world.structureManager.createFromWorld(id, watch.dimension, from, to, { includeEntities: false, saveMode: StructureSaveMode.World });
+    record(watch.playerId, "w", watch.dimension.id, from, id, from.x, from.y, from.z);
+    watch.saved.add(key);
+  } catch {
+    // 아직 로딩 안 된 칸 - 나중에 다시
+  }
+}
+
+/** 불이 있는(또는 생길) 칸 주변을 저장하고 감시 목록에 추가 */
+function threaten(watch, c, now) {
+  for (let dx = -1; dx <= 1; dx++) {
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dz = -1; dz <= 1; dz++) {
+        const n = { x: c.x + dx, y: c.y + dy, z: c.z + dz };
+        saveCell(watch, n);
+        const key = cellKey(n);
+        if (!watch.cells.has(key) && watch.cells.size < MAX_CELLS) watch.cells.set(key, { ...n, last: now });
+      }
+    }
+  }
+}
+
+export function startFireWatch(playerId, dimension, location) {
+  const now = system.currentTick;
+  let watch = fireWatches.find((w) => w.playerId === playerId && w.dimension.id === dimension.id);
+  if (!watch) {
+    watch = { playerId, dimension, cells: new Map(), saved: new Set(), start: now };
+    fireWatches.push(watch);
+  }
+  watch.start = now;
+  threaten(watch, { x: Math.floor(location.x / CELL), y: Math.floor(location.y / CELL), z: Math.floor(location.z / CELL) }, now);
+}
+
+system.runInterval(() => {
+  const now = system.currentTick;
+  for (let i = fireWatches.length - 1; i >= 0; i--) {
+    const watch = fireWatches[i];
+    let budget = 60; // 한 번에 살펴볼 칸 수
+    for (const [key, cell] of [...watch.cells]) {
+      if (budget-- <= 0) break;
+      watch.cells.delete(key);
+      let burning = false;
+      try {
+        const volume = new BlockVolume({ x: cell.x * CELL, y: cell.y * CELL, z: cell.z * CELL }, { x: cell.x * CELL + CELL - 1, y: cell.y * CELL + CELL - 1, z: cell.z * CELL + CELL - 1 });
+        burning = dimension_hasBlocks(watch.dimension, volume);
+      } catch {}
+      if (burning) {
+        cell.last = now;
+        threaten(watch, cell, now);
+      }
+      // 30초 동안 불이 없으면 그 칸은 그만 살펴봄 (맨 뒤로 보내서 돌아가며 검사)
+      if (now - cell.last < 600) watch.cells.set(key, cell);
+    }
+    if (watch.cells.size === 0 || now - watch.start > 20 * 60 * 30) fireWatches.splice(i, 1);
+  }
+}, 10);
+
+function dimension_hasBlocks(dimension, volume) {
+  const list = dimension.getBlocks(volume, { includeTypes: FIRE_TYPES }, false);
+  for (const _ of list.getBlockLocationIterator()) return true;
+  return false;
+}
+
 // 구조물 배치가 같은 틱에 바로 끝나지 않을 수 있어서, 바로 지우면 블럭이 사라지는 문제가 생김 → 10초 뒤 삭제
 function deleteStructureLater(structureId) {
   system.runTimeout(() => {
@@ -448,7 +543,7 @@ function isProtectedMob(entity) {
   if (entity.typeId === "minecraft:player" || entity.typeId === "minecraft:item" || entity.typeId === "minecraft:xp_orb") return false;
   try {
     const family = entity.getComponent("minecraft:type_family");
-    if (family && (family.hasTypeFamily("monster") || family.hasTypeFamily("inanimate"))) return false;
+    if (family && family.hasTypeFamily("monster")) return false; // 몬스터 빼고 전부 (갑옷 거치대, 배, 마인카트 포함)
   } catch {}
   return !!entity.getComponent("minecraft:health");
 }
