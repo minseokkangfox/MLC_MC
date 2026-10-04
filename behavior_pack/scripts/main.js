@@ -13,3 +13,4 @@ import "./bans.js";
 import "./reports.js";
 import "./joinleave.js";
 import "./welcome.js";
+import "./dupe.js";

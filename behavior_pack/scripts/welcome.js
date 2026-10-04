@@ -79,9 +79,9 @@ function playIntro(player, saved, longAbsence) {
 
   loadingPlayers.add(id);
   setInput(player, false);
-  for (const effect of ["invisibility", "resistance"]) {
+  for (const effect of ["invisibility", "resistance", "weakness", "mining_fatigue"]) {
     try {
-      player.addEffect(effect, loadTicks + GREETING_TICKS + 100, { amplifier: effect === "resistance" ? 255 : 0, showParticles: false });
+      player.addEffect(effect, loadTicks + GREETING_TICKS + 100, { amplifier: effect === "invisibility" ? 0 : 255, showParticles: false });
     } catch {}
   }
 
@@ -132,7 +132,7 @@ function playIntro(player, saved, longAbsence) {
       } catch {}
       setInput(player, true);
       try {
-        player.removeEffect("resistance");
+        for (const effect of ["resistance", "weakness", "mining_fatigue"]) player.removeEffect(effect);
         if (!isSilent(player)) player.removeEffect("invisibility");
       } catch {}
       loadingPlayers.delete(id);
@@ -140,6 +140,20 @@ function playIntro(player, saved, longAbsence) {
     }
   }, 1);
 }
+
+// 로딩 중에는 블럭 부수기/놓기/상호작용/아이템 사용/때리기 전부 막음
+world.beforeEvents.playerBreakBlock.subscribe((event) => {
+  if (loadingPlayers.has(event.player.id)) event.cancel = true;
+});
+world.beforeEvents.playerInteractWithBlock.subscribe((event) => {
+  if (loadingPlayers.has(event.player.id)) event.cancel = true;
+});
+world.beforeEvents.playerInteractWithEntity.subscribe((event) => {
+  if (loadingPlayers.has(event.player.id)) event.cancel = true;
+});
+world.beforeEvents.itemUse.subscribe((event) => {
+  if (loadingPlayers.has(event.source.id)) event.cancel = true;
+});
 
 world.afterEvents.playerSpawn.subscribe(({ player, initialSpawn }) => {
   if (!initialSpawn) return;
