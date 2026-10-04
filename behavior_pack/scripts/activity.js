@@ -367,7 +367,25 @@ function getQueueKeys() {
   return queueKeys;
 }
 
-/** 플레이어의 최근 5시간 행동 되돌리기 시작. 되돌릴 기록 개수 반환 */
+/** 플레이어별로 저장된 최근 행동 기록 개수 (밴 목록 표시용) */
+export function countActions() {
+  const since = Date.now() - windowMs();
+  const counts = new Map();
+  for (const key of world.getDynamicPropertyIds()) {
+    if (!key.startsWith(LOG_PREFIX)) continue;
+    const rest = key.slice(LOG_PREFIX.length);
+    const playerId = rest.slice(0, rest.lastIndexOf(":"));
+    try {
+      let n = 0;
+      for (const entry of JSON.parse(String(world.getDynamicProperty(key)))) if (entry[0] >= since) n++;
+      counts.set(playerId, (counts.get(playerId) ?? 0) + n);
+    } catch {}
+  }
+  for (const [playerId, buffer] of buffers) counts.set(playerId, (counts.get(playerId) ?? 0) + buffer.length);
+  return counts;
+}
+
+/** 플레이어의 최근 행동 되돌리기 시작. 되돌릴 기록 개수 반환 */
 export function startRollback(playerId, playerName) {
   flushPlayer(playerId);
   const since = Date.now() - windowMs();

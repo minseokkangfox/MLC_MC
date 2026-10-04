@@ -3,8 +3,8 @@ import { ActionFormData, ModalFormData } from "@minecraft/server-ui";
 import { CONFIG } from "./config.js";
 import { PREFIX, blockKey, isAdmin, tempCommandBlocks } from "./util.js";
 import { PLAYER_ICON, formatTime, playerButtonText, showForm } from "./forms.js";
-import { findOnlinePlayer, getKnownPlayers } from "./players.js";
-import { startRollback } from "./activity.js";
+import { findOnlinePlayer, getKnownPlayers, getLastLocation } from "./players.js";
+import { countActions, startRollback } from "./activity.js";
 
 const BAN_PREFIX = "mlc:ban:";
 const ROLLBACK_CATEGORY = "테러";
@@ -265,7 +265,7 @@ export async function showBanDetails(admin, target, defaultCategory) {
   return true;
 }
 
-/** /밴 : 접속 중 + 나간 플레이어 목록에서 선택 */
+/** /밴 : 접속 중 + 나간 플레이어 목록에서 선택 → 밴 또는 그 플레이어에게 이동 */
 export async function openBanMenu(admin) {
   const banned = new Set(getBans().map((b) => b.id));
   const players = getKnownPlayers().filter((p) => p.id !== admin.id && !banned.has(p.id) && !isAdmin(p));
@@ -273,11 +273,43 @@ export async function openBanMenu(admin) {
     admin.sendMessage(PREFIX + "밴할 수 있는 플레이어가 없습니다.");
     return;
   }
-  const form = new ActionFormData().title("플레이어 밴").body("밴할 플레이어를 선택하세요.\n위: 접속 중 / 아래: 나간 플레이어");
-  for (const p of players) form.button(playerButtonText(p), PLAYER_ICON);
+  const counts = countActions();
+  const hours = CONFIG.rollback.hours;
+  const form = new ActionFormData()
+    .title("플레이어 밴")
+    .body(`플레이어를 선택하세요. (기록 = 최근 ${hours}시간 동안 저장된 행동 수)\n위: 접속 중 / 아래: 나간 플레이어`);
+  for (const p of players) form.button(`${playerButtonText(p)} §8· 기록 ${counts.get(p.id) ?? 0}개`, PLAYER_ICON);
   const response = await showForm(admin, form);
   if (!response || response.canceled || response.selection === undefined) return;
-  await showBanDetails(admin, players[response.selection]);
+  const target = players[response.selection];
+
+  const actions = new ActionFormData()
+    .title(target.name)
+    .body(`${target.online ? "§2접속 중" : "§8나간 플레이어"}§r\n최근 ${hours}시간 기록: ${counts.get(target.id) ?? 0}개`)
+    .button("§c밴하기")
+    .button(target.online ? "이 플레이어에게 이동" : "나간 위치로 이동")
+    .button("뒤로");
+  const choice = await showForm(admin, actions);
+  if (!choice || choice.canceled) return;
+  if (choice.selection === 0) await showBanDetails(admin, target);
+  else if (choice.selection === 1) teleportTo(admin, target);
+  else if (choice.selection === 2) await openBanMenu(admin);
+}
+
+function teleportTo(admin, target) {
+  const online = findOnlinePlayer(target.id);
+  if (online) {
+    admin.teleport(online.location, { dimension: online.dimension });
+    admin.sendMessage(PREFIX + `§e${target.name}§r 에게 이동했습니다.`);
+    return;
+  }
+  const last = getLastLocation(target.id);
+  if (!last) {
+    admin.sendMessage(PREFIX + `§c${target.name} 의 나간 위치 기록이 없습니다.§r (이번 업데이트 이후에 나간 경우만 저장됨)`);
+    return;
+  }
+  admin.teleport({ x: last.x, y: last.y, z: last.z }, { dimension: world.getDimension(last.dimension) });
+  admin.sendMessage(PREFIX + `§e${target.name}§r 이(가) 나간 위치로 이동했습니다. (${Math.floor(last.x)}, ${Math.floor(last.y)}, ${Math.floor(last.z)})`);
 }
 
 /** /밴해제 : 밴 목록 -> 이유 확인 -> 해제 */

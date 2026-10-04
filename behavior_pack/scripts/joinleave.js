@@ -4,6 +4,8 @@ import { CONFIG } from "./config.js";
 import { PREFIX, isAdmin } from "./util.js";
 import { showForm } from "./forms.js";
 import { isBanned } from "./bans.js";
+import { afterLoading, isLongAbsence } from "./welcome.js";
+import { WELCOME_BACK_CHAT } from "./greetings.js";
 
 // 게임 기본 접속/퇴장 메시지는 리소스 팩(MLC 리소스)에서 빈 칸으로 바꿔 숨기고,
 // 같은 문구를 애드온이 대신 보냄. 그래서 관리자는 "조용히" 를 고르면 아무도 접속을 모름.
@@ -17,6 +19,16 @@ function announce(key, name) {
   world.sendMessage({ rawtext: [{ text: "§e" }, { translate: `mlc.player.${key}${suffix}`, with: [name] }] });
 }
 
+/** 접속 메시지: 3일 넘게 안 왔던 플레이어는 "오랜만에 ~님이 오셨어요" 같은 반기는 말 중 랜덤 */
+function announceJoin(player) {
+  if (isLongAbsence(player)) {
+    const line = WELCOME_BACK_CHAT[Math.floor(Math.random() * WELCOME_BACK_CHAT.length)];
+    world.sendMessage("§e" + line.split("{name}").join(player.name));
+    return;
+  }
+  announce("joined", player.name);
+}
+
 function goInvisible(player) {
   try {
     player.addEffect("invisibility", INVISIBLE_TICKS, { showParticles: false });
@@ -28,7 +40,7 @@ export function revealAdmin(player) {
   try {
     player.removeEffect("invisibility");
   } catch {}
-  announce("joined", player.name);
+  announceJoin(player);
 }
 
 export function hideAdmin(player) {
@@ -61,12 +73,13 @@ world.afterEvents.playerSpawn.subscribe(({ player, initialSpawn }) => {
   if (isAdmin(player)) {
     // 고를 때까지는 조용히 + 투명
     hideAdmin(player);
+    // 접속 로딩 화면이 끝난 뒤에 물어봄
     system.runTimeout(() => {
-      if (player.isValid) askAdmin(player).catch(() => {});
+      if (player.isValid) afterLoading(player, () => askAdmin(player).catch(() => {}));
     }, 20);
     return;
   }
-  announce("joined", player.name);
+  announceJoin(player);
 });
 
 world.beforeEvents.playerLeave.subscribe(({ player }) => {

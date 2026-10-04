@@ -12,3 +12,4 @@ import "./bookban.js";
 import "./bans.js";
 import "./reports.js";
 import "./joinleave.js";
+import "./welcome.js";
