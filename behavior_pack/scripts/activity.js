@@ -14,7 +14,8 @@ import { queueAdminNotice } from "./inbox.js";
 //   c: 상자 등 컨테이너 파괴 [.., 구조물id(내용물 포함 저장), 원래주인]
 //   s: 남의 상자를 열기 직전 내용물 [.., 구조물id, 블럭]  (훔쳐간 아이템 복구용)
 //   l: 액체  [.., 위치 두 곳 중 하나]
-//   w: 용암/물을 붓기 직전 주변 지형 [.., 구조물id, 시작x, 시작y, 시작z]  (용암+물로 생긴 돌 등 복구용)
+//   w: 용암/물/불/TNT 직전 주변 지형 [.., 구조물id, 시작x, 시작y, 시작z]  (용암+물로 생긴 돌, 탄 블럭, 떨어진 모래 등 복구용)
+//   m: 죽인 동물/주민 등 [.., 구조물id 또는 "", 몹 종류, 이름표]
 //   f: 불
 
 const LOG_PREFIX = "mlc:act:";
@@ -103,7 +104,7 @@ system.runInterval(() => {
 function deleteStructures(raw) {
   try {
     for (const entry of JSON.parse(String(raw))) {
-      if (entry[1] === "c" || entry[1] === "s" || entry[1] === "w") world.structureManager.delete(entry[6]);
+      if (["c", "s", "w", "m"].includes(entry[1]) && entry[6]) world.structureManager.delete(entry[6]);
     }
   } catch {}
 }
@@ -214,27 +215,31 @@ world.afterEvents.playerInteractWithBlock.subscribe(({ block, player }) => {
 
 // 용암/물을 붓기 직전 주변 지형을 저장해 두었다가, 되돌릴 때 용암·물 때문에 생긴 돌/조약돌/흑요석/현무암,
 // 흐르는 물·용암, 불에 탄 자리를 저장한 모습으로 복구
-const AREA = { horizontal: 8, below: 16, above: 4 };
+const LIQUID_AREA = { horizontal: 10, below: 18, above: 10, reuse: 2 };
+export const TNT_AREA = { horizontal: 7, below: 7, above: 10, reuse: 3 };
 const areaSnapshots = new Map(); // 플레이어 id -> [{ dimensionId, x, y, z, time }]
 
-function snapshotArea(player, dimension, center) {
+/** 주변 지형을 구조물로 저장 (같은 사람이 1분 안에 바로 옆에서 저장했으면 생략) */
+export function snapshotArea(playerId, dimension, center, area) {
+  if (!playerId) return;
+  center = { x: Math.floor(center.x), y: Math.floor(center.y), z: Math.floor(center.z) };
   const now = Date.now();
-  const recent = (areaSnapshots.get(player.id) ?? []).filter((s) => now - s.time < 2 * 60 * 1000);
-  // 2분 안에 근처(6칸)에서 이미 저장했으면 그걸로 충분
-  if (recent.some((s) => s.dimensionId === dimension.id && Math.abs(s.x - center.x) <= 6 && Math.abs(s.y - center.y) <= 6 && Math.abs(s.z - center.z) <= 6)) {
-    areaSnapshots.set(player.id, recent);
+  const recent = (areaSnapshots.get(playerId) ?? []).filter((s) => now - s.time < 60 * 1000);
+  const r = area.reuse;
+  if (recent.some((s) => s.dimensionId === dimension.id && Math.abs(s.x - center.x) <= r && Math.abs(s.y - center.y) <= r && Math.abs(s.z - center.z) <= r)) {
+    areaSnapshots.set(playerId, recent);
     return;
   }
   const { min, max } = dimension.heightRange;
-  const from = { x: center.x - AREA.horizontal, y: Math.max(min, center.y - AREA.below), z: center.z - AREA.horizontal };
-  const to = { x: center.x + AREA.horizontal, y: Math.min(max - 1, center.y + AREA.above), z: center.z + AREA.horizontal };
+  const from = { x: center.x - area.horizontal, y: Math.max(min, center.y - area.below), z: center.z - area.horizontal };
+  const to = { x: center.x + area.horizontal, y: Math.min(max - 1, center.y + area.above), z: center.z + area.horizontal };
   const id = `mlc:rb${now.toString(36)}${(structureSeq++).toString(36)}`;
   try {
     world.structureManager.createFromWorld(id, dimension, from, to, { includeEntities: false, saveMode: StructureSaveMode.World });
-    record(player.id, "w", dimension.id, center, id, from.x, from.y, from.z);
+    record(playerId, "w", dimension.id, center, id, from.x, from.y, from.z);
     recent.push({ dimensionId: dimension.id, ...center, time: now });
   } catch {}
-  areaSnapshots.set(player.id, recent);
+  areaSnapshots.set(playerId, recent);
 }
 
 const LIQUID_DAMAGE = new Set([
@@ -247,8 +252,12 @@ const LIQUID_DAMAGE = new Set([
   "minecraft:water",
   "minecraft:flowing_water",
   "minecraft:fire",
+  "minecraft:soul_fire",
   "minecraft:air",
 ]);
+
+const GRAVITY = new Set(["minecraft:sand", "minecraft:red_sand", "minecraft:gravel", "minecraft:suspicious_sand", "minecraft:suspicious_gravel"]);
+const isGravity = (typeId) => GRAVITY.has(typeId) || typeId.endsWith("_concrete_powder");
 
 /** @returns {boolean} 처리 완료 여부 */
 function restoreArea(dimension, entry) {
@@ -259,14 +268,15 @@ function restoreArea(dimension, entry) {
   const { x: sx, y: sy, z: sz } = structure.size;
   // 먼저 전부 로딩됐는지 확인
   if (!dimension.getBlock({ x: ox, y: oy, z: oz }) || !dimension.getBlock({ x: ox + sx - 1, y: oy + sy - 1, z: oz + sz - 1 })) return false;
-  for (let dx = 0; dx < sx; dx++) {
-    for (let dy = 0; dy < sy; dy++) {
+  // 아래층부터 복구해야 모래/자갈이 받침 없이 떨어지지 않음
+  for (let dy = 0; dy < sy; dy++) {
+    for (let dx = 0; dx < sx; dx++) {
       for (let dz = 0; dz < sz; dz++) {
         const location = { x: ox + dx, y: oy + dy, z: oz + dz };
         const block = dimension.getBlock(location);
-        if (!block || !LIQUID_DAMAGE.has(block.typeId)) continue;
+        if (!block || !(LIQUID_DAMAGE.has(block.typeId) || isGravity(block.typeId))) continue;
         const before = structure.getBlockPermutation({ x: dx, y: dy, z: dz });
-        if (!before || before.type.id === block.typeId) continue;
+        if (!before || before.type.id === block.typeId || before.type.id === "minecraft:tnt") continue; // TNT 는 다시 놓지 않음
         const owner = getBlockOwner(dimension.id, location);
         if (owner !== undefined && owner !== griefer) continue; // 다른 사람이 나중에 놓은 블럭
         block.setPermutation(before);
@@ -328,10 +338,11 @@ world.afterEvents.playerInteractWithBlock.subscribe(({ beforeItemStack, block, b
   if (item.endsWith("_bucket")) {
     record(player.id, "l", dimensionId, block.location);
     record(player.id, "l", dimensionId, front);
-    snapshotArea(player, block.dimension, front);
   } else {
     record(player.id, "f", dimensionId, front);
   }
+  // 용암·물이 흐르고 불이 번지기 전 주변 지형 저장
+  snapshotArea(player.id, block.dimension, front, LIQUID_AREA);
 });
 
 // ---------- 되돌리기 ----------
@@ -363,6 +374,12 @@ export function startRollback(playerId, playerName) {
   }
   // 최근 행동부터 거꾸로 되돌림
   entries.sort((a, b) => b[0] - a[0]);
+  // 모래·자갈처럼 떨어지는 블럭 복구는 맨 마지막에, 아래층부터 (받침이 먼저 복구되도록)
+  const isGravityRestore = (e) => (e[1] === "b" || e[1] === "x") && isGravity(e[6]);
+  const falling = entries.filter(isGravityRestore).sort((a, b) => a[4] - b[4]);
+  const others = entries.filter((e) => !isGravityRestore(e));
+  entries.length = 0;
+  entries.push(...others, ...falling);
   // 되돌릴 때 "다른 사람이 나중에 지은 블럭" 은 건드리지 않도록 누구의 기록인지 끝에 붙임
   for (const entry of entries) {
     if (entry[1] === "p") entry[7] = playerId;
@@ -413,6 +430,98 @@ function touchesLiquid(dimension, location) {
   return false;
 }
 
+// 구조물 배치가 같은 틱에 바로 끝나지 않을 수 있어서, 바로 지우면 블럭이 사라지는 문제가 생김 → 10초 뒤 삭제
+function deleteStructureLater(structureId) {
+  system.runTimeout(() => {
+    try {
+      world.structureManager.delete(structureId);
+    } catch {}
+  }, 200);
+}
+
+// ---------- 죽인 몹 (동물, 주민, 펫 등) ----------
+// 플레이어가 처음 때린 순간 몹을 구조물로 저장해 두었다가, 그 사람이 죽이면 기록.
+// 되돌릴 때 구조물로 다시 소환 (색깔·이름·길들인 주인·주민 거래 등 그대로). 한 방에 죽은 경우는 같은 종류로만 소환.
+const mobSnapshots = new Map(); // 몹 id -> { structureId, playerId }
+
+function isProtectedMob(entity) {
+  if (entity.typeId === "minecraft:player" || entity.typeId === "minecraft:item" || entity.typeId === "minecraft:xp_orb") return false;
+  try {
+    const family = entity.getComponent("minecraft:type_family");
+    if (family && (family.hasTypeFamily("monster") || family.hasTypeFamily("inanimate"))) return false;
+  } catch {}
+  return !!entity.getComponent("minecraft:health");
+}
+
+function killerOf(damageSource) {
+  const attacker = damageSource?.damagingEntity;
+  if (!attacker) return undefined;
+  if (attacker.typeId === "minecraft:player") return attacker.id;
+  return explosiveOwner(attacker); // TNT 로 죽인 경우
+}
+
+world.afterEvents.entityHurt.subscribe(({ hurtEntity, damageSource }) => {
+  const playerId = killerOf(damageSource);
+  if (!playerId || mobSnapshots.has(hurtEntity.id)) return;
+  try {
+    if (!isProtectedMob(hurtEntity)) return;
+    const health = hurtEntity.getComponent("minecraft:health");
+    if (!health || health.currentValue <= 0) return; // 이미 죽음 (한 방) → 죽을 때 종류만 기록
+    const location = { x: Math.floor(hurtEntity.location.x), y: Math.floor(hurtEntity.location.y), z: Math.floor(hurtEntity.location.z) };
+    const id = `mlc:rb${Date.now().toString(36)}${(structureSeq++).toString(36)}`;
+    world.structureManager.createFromWorld(id, hurtEntity.dimension, location, location, {
+      includeBlocks: false,
+      includeEntities: true,
+      saveMode: StructureSaveMode.World,
+    });
+    const entityId = hurtEntity.id;
+    mobSnapshots.set(entityId, { structureId: id, playerId });
+    // 5분 안에 안 죽으면 저장한 것 삭제
+    system.runTimeout(() => {
+      const snap = mobSnapshots.get(entityId);
+      if (snap && snap.structureId === id) {
+        mobSnapshots.delete(entityId);
+        try {
+          world.structureManager.delete(id);
+        } catch {}
+      }
+    }, 20 * 60 * 5);
+  } catch {}
+});
+
+world.afterEvents.entityDie.subscribe(({ deadEntity, damageSource }) => {
+  const snap = mobSnapshots.get(deadEntity.id);
+  mobSnapshots.delete(deadEntity.id);
+  const playerId = killerOf(damageSource) ?? snap?.playerId;
+  if (!playerId) {
+    if (snap) world.structureManager.delete(snap.structureId);
+    return;
+  }
+  try {
+    if (!snap && !isProtectedMob(deadEntity)) return;
+    const location = deadEntity.location;
+    let nameTag = "";
+    try {
+      nameTag = deadEntity.nameTag ?? "";
+    } catch {}
+    record(playerId, "m", deadEntity.dimension.id, location, snap?.structureId ?? "", deadEntity.typeId, nameTag);
+  } catch {}
+});
+
+/** @returns {boolean} 처리 완료 여부 */
+function restoreMob(dimension, entry) {
+  const [, , , x, y, z, structureId, typeId, nameTag] = entry;
+  if (!dimension.getBlock({ x, y, z })) return false; // 청크 로딩 대기
+  if (structureId && world.structureManager.get(structureId)) {
+    world.structureManager.place(structureId, dimension, { x, y, z }, { includeBlocks: false, includeEntities: true });
+    deleteStructureLater(structureId);
+    return true;
+  }
+  const mob = dimension.spawnEntity(typeId, { x: x + 0.5, y, z: z + 0.5 });
+  if (nameTag) mob.nameTag = nameTag;
+  return true;
+}
+
 function restore(block, entry) {
   const [, , , , , , typeId, states, previousOwner] = entry;
   if (!canOverwrite(block, entry)) return;
@@ -458,7 +567,7 @@ function undo(entry) {
           }
           if (previousOwner) setBlockOwner(dimension.id, block.location, previousOwner);
         }
-        world.structureManager.delete(structureId);
+        deleteStructureLater(structureId);
         break;
       }
       case "s": {
@@ -470,9 +579,11 @@ function undo(entry) {
             return false;
           }
         }
-        world.structureManager.delete(structureId);
+        deleteStructureLater(structureId);
         break;
       }
+      case "m":
+        return restoreMob(dimension, entry);
       case "w":
         try {
           return restoreArea(dimension, entry);

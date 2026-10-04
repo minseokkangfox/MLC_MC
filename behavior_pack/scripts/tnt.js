@@ -2,6 +2,7 @@ import { system, world } from "@minecraft/server";
 import { CONFIG } from "./config.js";
 import { blockKey } from "./util.js";
 import { clearBlockOwner, getBlockOwner, getBlockOwnerIndex, getOwnerIndex } from "./ownership.js";
+import { TNT_AREA, snapshotArea } from "./activity.js";
 
 // TNT / TNT 카트 폭발은 "자연 생성 블럭" 과 "터트린 사람이 설치한 블럭" 만 부숩니다.
 // 터트린 사람 = 부싯돌/화염구로 불을 붙인 사람, 없으면 TNT를 설치한 사람.
@@ -79,6 +80,8 @@ world.afterEvents.entitySpawn.subscribe(({ entity }) => {
     owner ??= chainOwner(dimension.id, location) ?? getBlockOwner(dimension.id, location) ?? dispenserOwner(dimension, location);
     clearBlockOwner(dimension.id, location);
     tagOwner(entity, owner);
+    // 터지기 전 주변 지형 저장 (되돌릴 때 떨어진 모래·자갈까지 원래대로)
+    snapshotArea(owner, dimension, location, TNT_AREA);
   } else if (entity.typeId === "minecraft:tnt_minecart") {
     // 설치 이벤트와 스폰 이벤트 순서가 섞일 수 있어서 조금 기다렸다가 짝을 맞춤
     system.runTimeout(() => {
