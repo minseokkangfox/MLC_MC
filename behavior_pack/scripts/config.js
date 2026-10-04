@@ -2,7 +2,7 @@
 // 숫자를 바꾼 뒤 팩을 다시 만들어 적용하면 됩니다.
 
 // 렐름에 새 버전이 제대로 적용됐는지 /mlc 상태 와 관리자 접속 알림에서 확인할 수 있음
-export const VERSION = "1.12.0";
+export const VERSION = "1.13.0";
 
 export const CONFIG = {
   // 관리자 게이머태그 (대소문자/띄어쓰기 무시하고 비교)
@@ -63,6 +63,11 @@ export const CONFIG = {
 
   report: {
     categories: ["테러", "욕설", "괴롭힘", "핵", "버그 악용", "사기", "도배", "기타"],
+  },
+
+  dupe: {
+    // 꾸러미(번들) 사용 금지: 베드락 복사 버그에 가장 많이 쓰임. 보이면 안의 아이템을 돌려주고 꾸러미는 없앰
+    banBundles: true,
   },
 
   bookBan: {

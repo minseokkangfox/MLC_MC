@@ -1,4 +1,5 @@
 import { EquipmentSlot, GameMode, system, world } from "@minecraft/server";
+import { CONFIG } from "./config.js";
 import { formatLocation, isAdmin, notifyAdmins, shortDimension } from "./util.js";
 import { queueAdminNotice } from "./inbox.js";
 
@@ -9,6 +10,10 @@ import { queueAdminNotice } from "./inbox.js";
 //    - 바닥에 버리면서 인벤토리에도 남는 렉 복사, 버리고 바로 나가는 접속 종료 복사, 죽을 때 복사,
 //      상자/동물 상자 복사 등 "같은 아이템이 두 개가 되는" 복사는 모두 해당
 // 2) 최대 개수보다 많이 쌓인 아이템(예: 토템 2개가 한 칸, 다이아 65개)은 최대 개수로 줄임.
+//
+// 3) 꾸러미(번들)는 베드락에서 복사 버그에 가장 많이 쓰여서 사용 금지 (config 의 dupe.banBundles).
+//    꾸러미가 보이면 안에 든 아이템을 꺼내 돌려주고 꾸러미는 없앰. 상자 화면 안에서 일어나는 복사는
+//    스크립트가 실시간으로 볼 수 없어서, 꾸러미 자체를 못 쓰게 하는 것이 가장 확실함.
 //
 // 같은 번호를 찾으면 "예전에 있던 곳"을 지금 다시 확인해서 정말 거기에도 있을 때만 복사로 판단하므로
 // 상자에 넣고 빼는 정상 플레이는 걸리지 않음. 크리에이티브 모드 플레이어와 관리자는 검사하지 않음.
@@ -116,6 +121,97 @@ function exempt(player) {
   } catch {
     return true;
   }
+}
+
+// ---------- 꾸러미 금지 ----------
+const isBundle = (typeId) => typeId === "minecraft:bundle" || typeId.endsWith("_bundle");
+
+function bundleContents(item) {
+  const items = [];
+  try {
+    const inner = item.getComponent("minecraft:inventory")?.container;
+    if (inner) for (let i = 0; i < inner.size; i++) {
+      const it = inner.getItem(i);
+      if (it) items.push(it);
+    }
+  } catch {}
+  return items;
+}
+
+/** 칸들에서 꾸러미를 없애고 안에 든 아이템 목록을 돌려줌 */
+function takeBundles(slots) {
+  const contents = [];
+  let count = 0;
+  for (const slot of slots) {
+    try {
+      if (!slot.hasItem() || !isBundle(slot.typeId)) continue;
+      contents.push(...bundleContents(slot.getItem()));
+      slot.setItem(undefined);
+      count++;
+    } catch {}
+  }
+  return { count, contents };
+}
+
+function giveBack(container, items, dimension, location) {
+  for (const item of items) {
+    let left = item;
+    try {
+      left = container ? container.addItem(item) : item;
+    } catch {}
+    if (left) {
+      try {
+        dimension.spawnItem(left, location);
+      } catch {}
+    }
+  }
+}
+
+const BUNDLE_MESSAGE = "§c[MLC] 꾸러미는 복사 버그 때문에 이 서버에서 사용할 수 없습니다. 안에 있던 아이템은 돌려드렸어요.";
+
+if (CONFIG.dupe.banBundles) {
+  // 인벤토리: 0.25초마다 (만들자마자 없앰)
+  system.runInterval(() => {
+    for (const player of world.getAllPlayers()) {
+      if (exempt(player)) continue;
+      const { count, contents } = takeBundles(playerSlots(player));
+      if (count === 0) continue;
+      giveBack(player.getComponent("minecraft:inventory")?.container, contents, player.dimension, player.location);
+      player.sendMessage(BUNDLE_MESSAGE);
+    }
+  }, 5);
+
+  // 상자 등을 열 때
+  world.afterEvents.playerInteractWithBlock.subscribe(({ block, player }) => {
+    if (exempt(player)) return;
+    let container;
+    try {
+      container = block.getComponent("minecraft:inventory")?.container;
+    } catch {}
+    if (!container) return;
+    const { count, contents } = takeBundles(containerSlots(container));
+    if (count === 0) return;
+    const above = { x: block.location.x + 0.5, y: block.location.y + 1, z: block.location.z + 0.5 };
+    giveBack(container, contents, block.dimension, above);
+    player.sendMessage(BUNDLE_MESSAGE);
+    report(`§c꾸러미 ${count}개 제거§r (상자 ${shortDimension(block.dimension.id)} ${formatLocation(block.location)}, 연 사람 ${player.name})`);
+  });
+
+  // 바닥에 떨어진 꾸러미 → 안의 아이템만 남김
+  world.afterEvents.entitySpawn.subscribe(({ entity }) => {
+    if (entity.typeId !== "minecraft:item") return;
+    system.run(() => {
+      try {
+        if (!entity.isValid) return;
+        const item = entity.getComponent("minecraft:item")?.itemStack;
+        if (!item || !isBundle(item.typeId)) return;
+        const { dimension, location } = entity;
+        const contents = bundleContents(item);
+        entity.remove();
+        giveBack(undefined, contents, dimension, location);
+      } catch {}
+    });
+  });
 }
 
 // 플레이어 인벤토리: 2초마다
