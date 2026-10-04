@@ -14,3 +14,4 @@ import "./reports.js";
 import "./joinleave.js";
 import "./welcome.js";
 import "./dupe.js";
+import "./mobcap.js";

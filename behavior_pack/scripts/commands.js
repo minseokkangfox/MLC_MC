@@ -6,7 +6,8 @@ import {
   world,
 } from "@minecraft/server";
 import { PREFIX, isAdmin } from "./util.js";
-import { VERSION } from "./config.js";
+import { CONFIG, VERSION } from "./config.js";
+import { mobCount } from "./mobcap.js";
 import { isForceSurvival, setForceSurvival } from "./gamemode.js";
 import { getRemovalLog, requestUrgentScan } from "./cmdblock.js";
 import { openReportInbox, openReportMenu } from "./reports.js";
@@ -91,7 +92,7 @@ function mlc(origin, action) {
     case "상태":
     case "status":
       return ok(
-        `MLC v${VERSION} - 강제 서바이벌: ${isForceSurvival() ? "§aON" : "§cOFF"}§r, 접속자 ${world.getAllPlayers().length}명, ` +
+        `MLC v${VERSION} - 내 주변 몹 ${mobCount(player)}/${CONFIG.mobCap.perPlayer}마리, 강제 서바이벌: ${isForceSurvival() ? "§aON" : "§cOFF"}§r, 접속자 ${world.getAllPlayers().length}명, ` +
           `제거한 커맨드 블록 ${getRemovalLog().length}개(최근 기록)`
       );
     case "스캔":
