@@ -15,3 +15,4 @@ import "./joinleave.js";
 import "./welcome.js";
 import "./dupe.js";
 import "./mobcap.js";
+import "./xray.js";

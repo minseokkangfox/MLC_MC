@@ -3,6 +3,7 @@ import { CONFIG } from "./config.js";
 import { clearBlockOwner, getBlockOwner, setBlockOwner } from "./ownership.js";
 import { explosiveOwner } from "./tnt.js";
 import { queueAdminNotice } from "./inbox.js";
+import { markWitherRemoval, witherOwner } from "./wither.js";
 
 // 모든 플레이어의 최근 행동(블럭 설치/파괴, TNT 폭발, 용암/물 붓기, 불 붙이기)을 기록하고,
 // 테러로 밴하면 그 플레이어의 최근 5시간 행동을 전부 되돌립니다.
@@ -331,7 +332,7 @@ world.afterEvents.blockExplode.subscribe(({ block, dimension, explodedBlockPermu
   if (explodedBlockPermutation.type.id === "minecraft:tnt") return;
   const previousOwner = getBlockOwner(dimension.id, block.location) ?? 0;
   clearBlockOwner(dimension.id, block.location);
-  const owner = explosiveOwner(source);
+  const owner = explosiveOwner(source) ?? witherOwner(source); // TNT 또는 그 사람이 소환한 위더의 폭발
   if (owner) record(owner, "x", dimension.id, block.location, ...permutationData(explodedBlockPermutation), previousOwner);
 });
 
@@ -418,6 +419,7 @@ export function startRollback(playerId, playerName) {
     world.setDynamicProperty(key, JSON.stringify(chunk));
     getQueueKeys().push(key);
   });
+  markWitherRemoval(playerId); // 그 사람이 소환한 위더도 전부 제거
   if (entries.length > 0) queueAdminNotice(`${playerName} 의 최근 ${CONFIG.rollback.hours}시간 행동 ${entries.length}개 되돌리는 중`);
   return entries.length;
 }
@@ -502,6 +504,11 @@ function threaten(watch, c, now) {
   }
 }
 
+/** 위더처럼 움직이며 부수는 것: 그 주변 칸들을 부서지기 전에 저장 (불 따라가기와 같은 방식) */
+export function protectAround(playerId, dimension, location) {
+  startFireWatch(playerId, dimension, location);
+}
+
 export function startFireWatch(playerId, dimension, location) {
   const now = system.currentTick;
   let watch = fireWatches.find((w) => w.playerId === playerId && w.dimension.id === dimension.id);
@@ -570,7 +577,7 @@ function killerOf(damageSource) {
   const attacker = damageSource?.damagingEntity;
   if (!attacker) return undefined;
   if (attacker.typeId === "minecraft:player") return attacker.id;
-  return explosiveOwner(attacker); // TNT 로 죽인 경우
+  return explosiveOwner(attacker) ?? witherOwner(attacker); // TNT / 그 사람이 소환한 위더로 죽인 경우
 }
 
 world.afterEvents.entityHurt.subscribe(({ hurtEntity, damageSource }) => {

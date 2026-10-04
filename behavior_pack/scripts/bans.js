@@ -5,6 +5,7 @@ import { PREFIX, blockKey, isAdmin, tempCommandBlocks } from "./util.js";
 import { PLAYER_ICON, formatTime, playerButtonText, showForm } from "./forms.js";
 import { findOnlinePlayer, getKnownPlayers, getLastLocation } from "./players.js";
 import { countActions, startRollback } from "./activity.js";
+import { clearWitherRemoval } from "./wither.js";
 
 const BAN_PREFIX = "mlc:ban:";
 const ROLLBACK_CATEGORY = "테러";
@@ -45,6 +46,7 @@ export function isBanned(player) {
 
 /** 같은 id 또는 같은 이름으로 저장된 밴을 전부 삭제 */
 export function unbanPlayer(ban) {
+  clearWitherRemoval(ban.id);
   const name = normalize(ban.name);
   for (const [key, other] of [...loadBans()]) {
     if (other.id === ban.id || normalize(other.name) === name) {

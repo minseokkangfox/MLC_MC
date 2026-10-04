@@ -1,10 +1,48 @@
 import { system, world } from "@minecraft/server";
 import { CONFIG } from "./config.js";
 import { PREFIX } from "./util.js";
+import { protectAround } from "./activity.js";
 
 const BORN_KEY = "mlc:bornAt";
 const SUMMONER_KEY = "mlc:summoner";
 const DIMENSIONS = ["minecraft:overworld", "minecraft:nether", "minecraft:the_end"];
+const KILL_KEY = "mlc:witherKill"; // 테러로 밴 당해서 위더를 없애야 하는 플레이어 id 목록
+
+function killList() {
+  try {
+    return JSON.parse(String(world.getDynamicProperty(KILL_KEY) ?? "[]"));
+  } catch {
+    return [];
+  }
+}
+
+/** 테러로 밴하면: 그 사람이 소환한 위더를 전부 제거 (지금 안 불러와진 위더도 나중에 불러와지면 제거) */
+export function markWitherRemoval(playerId) {
+  const list = killList();
+  if (!list.includes(playerId)) {
+    list.push(playerId);
+    world.setDynamicProperty(KILL_KEY, JSON.stringify(list.slice(-200)));
+  }
+}
+
+/** 밴이 풀리면 위더 제거 대상에서 뺌 */
+export function clearWitherRemoval(playerId) {
+  world.setDynamicProperty(KILL_KEY, JSON.stringify(killList().filter((id) => id !== playerId)));
+}
+
+/** 위더 또는 위더 해골의 주인(소환한 플레이어 id) */
+export function witherOwner(entity) {
+  try {
+    if (!entity) return undefined;
+    let wither = entity;
+    if (entity.typeId.includes("wither_skull")) wither = entity.getComponent("minecraft:projectile")?.owner;
+    if (wither?.typeId !== "minecraft:wither") return undefined;
+    const owner = wither.getDynamicProperty(SUMMONER_KEY);
+    return typeof owner === "string" ? owner : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 // 위더를 소환한 사람 찾기: 위더 해골/영혼 모래를 마지막으로 놓은 사람
 const recentPlacements = []; // { dimensionId, location, playerId, tick }
@@ -61,6 +99,7 @@ world.afterEvents.entitySpawn.subscribe(({ entity }) => {
 // (시간은 실제 시간 기준이라 청크가 언로드돼 있던 시간도 포함)
 system.runInterval(() => {
   const now = Date.now();
+  const kill = killList();
   for (const id of DIMENSIONS) {
     let withers = [];
     try {
@@ -76,7 +115,14 @@ system.runInterval(() => {
           bornAt = now;
           wither.setDynamicProperty(BORN_KEY, now);
         }
-        const summoner = findPlayer(wither.getDynamicProperty(SUMMONER_KEY));
+        const summonerId = wither.getDynamicProperty(SUMMONER_KEY);
+        if (typeof summonerId === "string" && kill.includes(summonerId)) {
+          wither.remove(); // 테러로 밴 당한 사람의 위더 (네더의 별 없음)
+          continue;
+        }
+        // 위더가 부수기 전에 주변 지형 저장 (테러로 밴하면 위더가 부순 지형 복구)
+        if (typeof summonerId === "string") protectAround(summonerId, wither.dimension, wither.location);
+        const summoner = findPlayer(summonerId);
         const remaining = CONFIG.wither.maxLifeMs - (now - bornAt);
         if (remaining <= 0) {
           wither.remove();
