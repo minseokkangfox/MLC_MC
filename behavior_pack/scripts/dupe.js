@@ -1,6 +1,6 @@
 import { EquipmentSlot, GameMode, system, world } from "@minecraft/server";
 import { CONFIG } from "./config.js";
-import { formatLocation, isAdmin, notifyAdmins, shortDimension } from "./util.js";
+import { formatLocation, isAdmin, notifyAdmins, shortDimension, skipChecks } from "./util.js";
 import { queueAdminNotice } from "./inbox.js";
 
 // 복사 버그 막기
@@ -115,9 +115,10 @@ function checkSlots(slots, place) {
   return removed;
 }
 
+/** 고유번호 복사 검사 제외: 관리자, 크리에이티브(아이템을 마음대로 꺼낼 수 있어서 복사 판단이 의미 없음) */
 function exempt(player) {
   try {
-    return isAdmin(player) || player.getGameMode() === GameMode.Creative;
+    return skipChecks(player) || player.getGameMode() === GameMode.Creative;
   } catch {
     return true;
   }
@@ -173,7 +174,7 @@ if (CONFIG.dupe.banBundles) {
   // 인벤토리: 0.25초마다 (만들자마자 없앰)
   system.runInterval(() => {
     for (const player of world.getAllPlayers()) {
-      if (exempt(player)) continue;
+      if (skipChecks(player)) continue;
       const { count, contents } = takeBundles(playerSlots(player));
       if (count === 0) continue;
       giveBack(player.getComponent("minecraft:inventory")?.container, contents, player.dimension, player.location);
@@ -183,7 +184,7 @@ if (CONFIG.dupe.banBundles) {
 
   // 상자 등을 열 때
   world.afterEvents.playerInteractWithBlock.subscribe(({ block, player }) => {
-    if (exempt(player)) return;
+    if (skipChecks(player)) return;
     let container;
     try {
       container = block.getComponent("minecraft:inventory")?.container;

@@ -1,5 +1,5 @@
-import { system, world } from "@minecraft/server";
-import { formatLocation, isAdmin, notifyAdmins, shortDimension } from "./util.js";
+import { GameMode, system, world } from "@minecraft/server";
+import { formatLocation, isAdmin, notifyAdmins, shortDimension, skipChecks } from "./util.js";
 import { queueAdminNotice } from "./inbox.js";
 
 // 엑스레이 막기
@@ -19,7 +19,10 @@ const stuckTicks = new Map(); // 플레이어 id -> 끼어 있던 횟수
 
 system.runInterval(() => {
   for (const player of world.getAllPlayers()) {
-    if (isAdmin(player)) continue;
+    if (skipChecks(player)) continue;
+    try {
+      if (player.getGameMode() === GameMode.Spectator) continue; // 관전 모드는 원래 블럭을 통과함
+    } catch {}
     try {
       const head = player.getHeadLocation();
       const block = player.dimension.getBlock({ x: Math.floor(head.x), y: Math.floor(head.y), z: Math.floor(head.z) });

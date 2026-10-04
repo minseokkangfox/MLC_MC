@@ -5,7 +5,7 @@ import {
   system,
   world,
 } from "@minecraft/server";
-import { PREFIX, isAdmin } from "./util.js";
+import { PREFIX, isAdmin, testMode } from "./util.js";
 import { CONFIG, VERSION } from "./config.js";
 import { mobCount } from "./mobcap.js";
 import { isForceSurvival, setForceSurvival } from "./gamemode.js";
@@ -20,6 +20,7 @@ const HELP = [
   "§e/밴§r, §e/밴해제§r - 밴 / 밴 해제 (관리자)",
   "§e/mlc 게임모드§r - 관리자 제외 모두 강제 서바이벌 + 커맨드 블록 제거 (다시 입력하면 해제)",
   "§e/mlc 공개§r / §e/mlc 조용히§r - 접속 알리기 / 투명하게 숨기 (관리자)",
+  "§e/mlc 테스트§r - 관리자도 복사/엑스레이/꾸러미 검사 받기 (켜기/끄기)",
   "§e/mlc 상태§r, §e/mlc 스캔§r, §e/mlc 로그§r",
 ].join("\n");
 
@@ -89,6 +90,17 @@ function mlc(origin, action) {
     case "hide":
       system.run(() => hideAdmin(player));
       return ok("조용히 모드: 투명 상태가 되고 나갈 때 퇴장 메시지가 안 뜹니다. (이미 뜬 접속 메시지는 지울 수 없음)");
+    case "테스트":
+    case "test": {
+      const on = !testMode.has(player.id);
+      if (on) testMode.add(player.id);
+      else testMode.delete(player.id);
+      return ok(
+        on
+          ? "§a테스트 모드 ON§r - 관리자도 복사/엑스레이/꾸러미 검사를 일반 플레이어처럼 받습니다. (복사 검사는 서바이벌에서만)"
+          : "§c테스트 모드 OFF§r - 관리자는 다시 검사에서 빠집니다."
+      );
+    }
     case "상태":
     case "status":
       return ok(

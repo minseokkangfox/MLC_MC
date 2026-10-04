@@ -12,6 +12,14 @@ export const tempCommandBlocks = new Set();
 /** 접속 로딩 화면을 보고 있는 플레이어 id */
 export const loadingPlayers = new Set();
 
+/** /mlc 테스트 를 켠 관리자: 복사/엑스레이/꾸러미 검사를 일반 플레이어처럼 받음 */
+export const testMode = new Set();
+
+/** 관리자라서 검사를 건너뛰는지 (테스트 모드면 건너뛰지 않음) */
+export function skipChecks(player) {
+  return isAdmin(player) && !testMode.has(player.id);
+}
+
 export function isAdmin(player) {
   try {
     return ADMIN_NAMES.has(normalize(player.name));
