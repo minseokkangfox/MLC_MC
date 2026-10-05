@@ -16,3 +16,4 @@ import "./welcome.js";
 import "./dupe.js";
 import "./mobcap.js";
 import "./xray.js";
+import "./silentadmin.js";
