@@ -1,6 +1,7 @@
 import { EquipmentSlot, system, world } from "@minecraft/server";
 import { CONFIG } from "./config.js";
 import { PREFIX, isAdmin } from "./util.js";
+import { INTRO_TICKS, showIntro } from "./intro.js";
 
 const KNOWN_KEY = "mlc:known";
 const PENDING_KEY = "mlc:pendingRelocate";
@@ -113,6 +114,8 @@ function relocate(player, target, attempt = 0) {
   const overworld = world.getDimension("minecraft:overworld");
   const { x, z } = target;
   setState(player, target);
+  // 처음 한 번만: 하늘에서 떨어지는 동안 서버 로고 + 설명
+  if (attempt === 0) showIntro(player);
 
   // 청크가 로딩될 때까지 하늘에서 천천히 떨어지며 대기
   player.teleport({ x: x + 0.5, y: 300, z: z + 0.5 }, { dimension: overworld });
@@ -130,8 +133,10 @@ function relocate(player, target, attempt = 0) {
     try {
       top = overworld.getTopmostBlock({ x, z });
     } catch {}
+    // 로고 화면이 끝날 때까지는 계속 천천히 떨어지게 둠
+    if (top && attempt === 0 && tries * 10 < INTRO_TICKS) return;
     if (!top) {
-      if (tries > 60) {
+      if (tries > 60 + INTRO_TICKS / 10) {
         // 30초 안에 땅을 못 찾음 - 그냥 떨어지게 두고 착지한 곳을 스폰으로
         system.clearRun(handle);
         finishWhenLanded(player);

@@ -1,0 +1,34 @@
+import { system } from "@minecraft/server";
+import { CONFIG } from "./config.js";
+
+// 서버 로고 + 설명 화면 (처음 들어온 플레이어가 하늘에서 천천히 떨어지는 동안, 관리자는 /hll 로 다시 보기)
+// 로고 그림은 리소스팩 font/glyph_E1.png 에 들어 있고, 아래 특수 문자들이 그 그림 조각입니다 (tools/make_logo_glyph.py).
+const row = (start) => Array.from({ length: 8 }, (_, i) => String.fromCharCode(start + i)).join("");
+export const LOGO = `${row(0xe100)}\n${row(0xe110)}`;
+
+export const INTRO_TICKS = CONFIG.intro.seconds * 20;
+
+/** 로고와 서버 설명을 seconds 초 동안 보여줌 */
+export function showIntro(player) {
+  const lines = CONFIG.intro.lines;
+  let tick = 0;
+  const handle = system.runInterval(() => {
+    if (!player.isValid || tick >= INTRO_TICKS) {
+      system.clearRun(handle);
+      return;
+    }
+    if (tick % 20 === 0) {
+      player.onScreenDisplay.setTitle(LOGO, {
+        subtitle: CONFIG.intro.subtitle,
+        fadeInDuration: tick === 0 ? 10 : 0,
+        stayDuration: tick + 20 >= INTRO_TICKS ? 30 : 40,
+        fadeOutDuration: 10,
+      });
+    }
+    // 아래쪽 설명은 몇 줄을 돌아가며 보여줌
+    if (tick % 60 === 0 && lines.length > 0) {
+      player.onScreenDisplay.setActionBar(lines[Math.floor(tick / 60) % lines.length]);
+    }
+    tick += 5;
+  }, 5);
+}

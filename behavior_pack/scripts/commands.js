@@ -13,6 +13,7 @@ import { getRemovalLog, requestUrgentScan } from "./cmdblock.js";
 import { openReportInbox, openReportMenu } from "./reports.js";
 import { openBanMenu, openUnbanMenu } from "./bans.js";
 import { hideAdmin, isSilent, revealAdmin } from "./joinleave.js";
+import { showIntro } from "./intro.js";
 
 const HELP = [
   "§e/신고§r - 플레이어 신고 (누구나)",
@@ -20,6 +21,7 @@ const HELP = [
   "§e/밴§r, §e/밴해제§r - 밴 / 밴 해제 (관리자)",
   "§e/mlc 게임모드§r - 관리자 제외 모두 강제 서바이벌 + 커맨드 블록 제거 (다시 입력하면 해제)",
   "§e/mlc 공개§r / §e/mlc 조용히§r - 접속 알리기 / 투명하게 숨기 (관리자)",
+  "§e/hll§r - 처음 들어온 플레이어가 보는 로고 화면 보기 (관리자)",
   "§e/mlc 테스트§r - 관리자도 복사/엑스레이/꾸러미 검사 받기 (켜기/끄기)",
   "§e/mlc 상태§r, §e/mlc 스캔§r, §e/mlc 로그§r",
 ].join("\n");
@@ -49,6 +51,15 @@ const report = formCommand(openReportMenu, false);
 const reportInbox = formCommand(openReportInbox, true);
 const ban = formCommand(openBanMenu, true);
 const unban = formCommand(openUnbanMenu, true);
+
+/** /hll : 처음 들어온 플레이어가 보는 로고 화면 다시 보기 (관리자) */
+function hll(origin) {
+  const player = getPlayer(origin);
+  if (!player) return fail("플레이어만 사용할 수 있습니다.");
+  if (!isAdmin(player)) return fail("§c관리자만 사용할 수 있는 명령어입니다.");
+  system.run(() => showIntro(player));
+  return { status: CustomCommandStatus.Success };
+}
 
 function mlc(origin, action) {
   const keyword = (action ?? "").trim().toLowerCase();
@@ -90,6 +101,10 @@ function mlc(origin, action) {
     case "hide":
       system.run(() => hideAdmin(player));
       return ok("조용히 모드: 투명 상태가 되고 나갈 때 퇴장 메시지가 안 뜹니다. (이미 뜬 접속 메시지는 지울 수 없음)");
+    case "hll":
+    case "로고":
+      system.run(() => showIntro(player));
+      return ok("서버 로고 화면을 보여줍니다. (처음 들어온 플레이어가 보는 화면)");
     case "테스트":
     case "test": {
       const on = !testMode.has(player.id);
@@ -147,6 +162,7 @@ system.beforeEvents.startup.subscribe(({ customCommandRegistry }) => {
   register("mlc:reports", "신고함 (관리자)", reportInbox);
   register("mlc:ban", "플레이어 밴 (관리자)", ban);
   register("mlc:unban", "밴 해제 (관리자)", unban);
+  register("mlc:hll", "서버 로고 화면 보기 (관리자)", hll);
   // 한글 이름 (/신고, /신고함, /밴, /밴해제)
   register("mlc:신고", "플레이어 신고", report);
   register("mlc:신고함", "신고함 (관리자)", reportInbox);
