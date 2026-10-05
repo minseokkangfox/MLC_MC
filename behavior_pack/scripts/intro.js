@@ -2,8 +2,8 @@ import { system } from "@minecraft/server";
 import { CONFIG } from "./config.js";
 
 // 서버 로고 + 설명 화면 (처음 들어온 플레이어가 하늘에서 천천히 떨어지는 동안, 관리자는 /hll 로 다시 보기)
-// 로고 그림은 리소스팩 font/glyph_E1.png 에 들어 있고, 아래 특수 문자 2개가 그 그림 조각입니다 (tools/make_logo_glyph.py).
-export const LOGO = "\ue100\ue101";
+// 로고 그림은 리소스팩 font/glyph_E1.png 에 들어 있고, 아래 특수 문자 1개가 로고 그림입니다 (tools/make_logo_glyph.py).
+export const LOGO = "\ue100";
 
 export const INTRO_TICKS = CONFIG.intro.seconds * 20;
 
