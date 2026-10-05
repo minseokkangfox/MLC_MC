@@ -14,9 +14,12 @@ import { openReportInbox, openReportMenu } from "./reports.js";
 import { openBanMenu, openUnbanMenu } from "./bans.js";
 import { hideAdmin, isSilent, revealAdmin } from "./joinleave.js";
 import { showIntro } from "./intro.js";
+import { MessageFormData } from "@minecraft/server-ui";
+import { showForm } from "./forms.js";
 import { armNewSpawn, disarmNewSpawn, isNewSpawnArmed } from "./spawn.js";
 
 const HELP = [
+  "§e/규칙§r - 서버 규칙 보기 (누구나)",
   "§e/신고§r - 플레이어 신고 (누구나)",
   "§e/신고함§r - 신고 확인 (관리자)",
   "§e/밴§r, §e/밴해제§r - 밴 / 밴 해제 (관리자)",
@@ -54,6 +57,17 @@ const reportInbox = formCommand(openReportInbox, true);
 const ban = formCommand(openBanMenu, true);
 const unban = formCommand(openUnbanMenu, true);
 
+/** /규칙 : 서버 규칙 (누구나) */
+async function openRules(player) {
+  const form = new MessageFormData()
+    .title("§lMLC 서버 규칙")
+    .body(CONFIG.rules.join("\n\n"))
+    .button1("§2확인했습니다")
+    .button2("§8닫기");
+  await showForm(player, form);
+}
+const rules = formCommand(openRules, false);
+
 /** /hll : 처음 들어온 플레이어가 보는 로고 화면 다시 보기 (관리자) */
 function hll(origin) {
   const player = getPlayer(origin);
@@ -81,6 +95,7 @@ function start2(origin) {
 function mlc(origin, action) {
   const keyword = (action ?? "").trim().toLowerCase();
   if (keyword === "신고" || keyword === "report") return report(origin);
+  if (keyword === "규칙" || keyword === "rules") return rules(origin);
   const player = getPlayer(origin);
   if (!player) return fail("플레이어만 사용할 수 있습니다.");
   if (!isAdmin(player)) return fail("§c관리자만 사용할 수 있는 명령어입니다.");
@@ -186,6 +201,7 @@ system.beforeEvents.startup.subscribe(({ customCommandRegistry }) => {
   register("mlc:reports", "신고함 (관리자)", reportInbox);
   register("mlc:ban", "플레이어 밴 (관리자)", ban);
   register("mlc:unban", "밴 해제 (관리자)", unban);
+  register("mlc:rules", "서버 규칙 보기", rules);
   register("mlc:hll", "서버 로고 화면 보기 (관리자)", hll);
   register("mlc:start2", "랜덤 좌표 시작 켜기 (관리자)", start2);
   // 한글 이름 (/신고, /신고함, /밴, /밴해제)
@@ -193,5 +209,6 @@ system.beforeEvents.startup.subscribe(({ customCommandRegistry }) => {
   register("mlc:신고함", "신고함 (관리자)", reportInbox);
   register("mlc:밴", "플레이어 밴 (관리자)", ban);
   register("mlc:밴해제", "밴 해제 (관리자)", unban);
+  register("mlc:규칙", "서버 규칙 보기", rules);
   register("mlc:시작2", "랜덤 좌표 시작 켜기 (관리자)", start2);
 });
