@@ -195,6 +195,7 @@
 
 ## 설정 바꾸기
 `behavior_pack/scripts/config.js` 에서 거리, 시간, 용량 한도 등을 바꾼 뒤 `./build.sh` 로 다시 묶고,
+(배포용 팩은 이름만 `MLC_MC` 로 하고 설명은 비워 두며, `./build.sh` 가 스크립트/JSON/언어 파일의 주석을 모두 지운 뒤 묶습니다. Node.js 필요, 처음엔 자동으로 `npm install`.)
 `manifest.json` 의 `version` 숫자를 올려서 다시 적용하면 됩니다.
 
 ## 렐름 팁

@@ -1,13 +1,13 @@
 {
   "format_version": 2,
   "header": {
-    "name": "MLC 리소스 (접속 메시지)",
-    "description": "기본 접속/퇴장 메시지를 숨기고 MLC 애드온이 대신 보냄",
+    "name": "MLC_MC",
+    "description": "",
     "uuid": "a1207b9f-f45c-48ef-9377-d8b9eb1886d9",
     "version": [
       1,
       7,
-      0
+      1
     ],
     "min_engine_version": [
       1,
@@ -22,7 +22,7 @@
       "version": [
         1,
         7,
-        0
+        1
       ]
     }
   ]
