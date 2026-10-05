@@ -13,6 +13,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, "logo.png")
 OUT = os.path.join(HERE, "..", "resource_pack", "font", "glyph_E1.png")
 CELL = 128  # 칸 하나의 픽셀 수 = 로고 폭 (이게 곧 화면 크기를 정함)
+# 칸 안에서 로고를 놓을 높이 (위에서부터 픽셀). 칸 가운데(약 48)보다 작을수록 화면에서 위로 올라감
+TOP = 18
 
 
 def main():
@@ -27,7 +29,7 @@ def main():
             pixels[x, y] = (r, g, b, 255) if a >= 128 else (0, 0, 0, 0)
 
     cell = Image.new("RGBA", (CELL, CELL), (0, 0, 0, 0))
-    cell.paste(resized, (0, (CELL - resized.height) // 2))
+    cell.paste(resized, (0, TOP))
     sheet = Image.new("RGBA", (16 * CELL, 16 * CELL), (0, 0, 0, 0))
     sheet.paste(cell, (0, 0))
     os.makedirs(os.path.dirname(OUT), exist_ok=True)

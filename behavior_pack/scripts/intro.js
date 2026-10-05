@@ -9,26 +9,24 @@ export const INTRO_TICKS = CONFIG.intro.seconds * 20;
 
 /** 로고와 서버 설명을 seconds 초 동안 보여줌 */
 export function showIntro(player) {
-  // 로고는 부제목 줄에 (제목 줄은 글자가 너무 크게 그려짐), 설명은 화면 아래쪽에 돌아가며
+  // 로고는 부제목 줄에 한 번만 보냄 (매초 다시 보내면 화면이 툭툭 끊겨 보임)
+  player.onScreenDisplay.setTitle(" ", {
+    subtitle: LOGO,
+    fadeInDuration: 10,
+    stayDuration: INTRO_TICKS - 20,
+    fadeOutDuration: 10,
+  });
+  // 아래쪽 설명은 2초마다 다음 줄로
   const lines = [CONFIG.intro.subtitle, ...CONFIG.intro.lines];
-  let tick = 0;
-  const handle = system.runInterval(() => {
-    if (!player.isValid || tick >= INTRO_TICKS) {
+  let index = 0;
+  const next = () => {
+    if (!player.isValid || index * 40 >= INTRO_TICKS) {
       system.clearRun(handle);
       return;
     }
-    if (tick % 20 === 0) {
-      player.onScreenDisplay.setTitle(" ", {
-        subtitle: LOGO,
-        fadeInDuration: tick === 0 ? 10 : 0,
-        stayDuration: tick + 20 >= INTRO_TICKS ? 30 : 40,
-        fadeOutDuration: 10,
-      });
-    }
-    // 아래쪽 설명은 몇 줄을 돌아가며 보여줌
-    if (tick % 40 === 0 && lines.length > 0) {
-      player.onScreenDisplay.setActionBar(lines[Math.floor(tick / 40) % lines.length]);
-    }
-    tick += 5;
-  }, 5);
+    player.onScreenDisplay.setActionBar(lines[index % lines.length]);
+    index++;
+  };
+  const handle = system.runInterval(next, 40);
+  next();
 }
