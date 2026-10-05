@@ -3,7 +3,8 @@
 
 마인크래프트 베드락은 font/glyph_E1.png 의 16x16 칸을 문자 U+E100 ~ U+E1FF 로 보여줍니다.
 로고를 가로 2칸으로 잘라 넣고, 화면 제목(title)에 그 문자들(U+E100, U+E101)을 쓰면 로고 그림이 나옵니다.
-제목에서는 글자 하나가 화면 폭의 약 1/4 크기로 그려져서(그림 픽셀 수와 거의 상관없음), 칸 수로 크기를 정합니다.
+화면 크기: 베드락은 그림 픽셀 1개를 제목(title)에서 약 14픽셀, 부제목(subtitle)에서 약 6픽셀로 그림.
+그래서 로고는 부제목에 넣고, 전체 폭 128픽셀(64 x 2칸) → 화면에서 약 770픽셀(1080p 화면 폭의 약 40%).
 로고를 바꾸려면 tools/logo.png 를 바꾸고 이 파일을 다시 실행하세요. (pip install pillow 필요)
 """
 import os
@@ -12,8 +13,8 @@ from PIL import Image
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, "logo.png")
 OUT = os.path.join(HERE, "..", "resource_pack", "font", "glyph_E1.png")
-CELL = 128  # 칸 하나의 그림 해상도 (선명도)
-COLS, ROWS = 2, 1  # 칸 수 = 화면에 보이는 크기 (2칸 ≈ 화면 폭의 절반)
+CELL = 64  # 칸 하나의 픽셀 수 (이게 곧 화면 크기를 정함)
+COLS, ROWS = 2, 1
 
 
 def main():
