@@ -1,0 +1,33 @@
+{
+  "namespace": "hud",
+
+  // MLC 서버 로고: 화면 제목이 "§m§l§c" 일 때만 보이는 고화질 로고 그림 (behavior_pack/scripts/intro.js)
+  "root_panel": {
+    "modifications": [
+      {
+        "array_name": "controls",
+        "operation": "insert_back",
+        "value": [ { "mlc_logo@hud.mlc_logo": {} } ]
+      }
+    ]
+  },
+
+  "mlc_logo": {
+    "type": "image",
+    "texture": "textures/ui/mlc_logo",
+    "size": [ 256, 66 ],
+    "anchor_from": "top_middle",
+    "anchor_to": "top_middle",
+    "offset": [ 0, 56 ],
+    "layer": 50,
+    "visible": false,
+    "bindings": [
+      { "binding_name": "#hud_title_text_string" },
+      {
+        "binding_type": "view",
+        "source_property_name": "(#hud_title_text_string = '§m§l§c')",
+        "target_property_name": "#visible"
+      }
+    ]
+  }
+}

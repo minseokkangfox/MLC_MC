@@ -57,8 +57,10 @@
 ### 서버 로고 화면
 - 처음 들어온 플레이어가 먼 곳으로 옮겨지면서 하늘에서 천천히 떨어지는 동안(약 9초), 화면 가운데에 **MLC_MC 로고**가 뜨고
   화면 아래쪽에 환영 문구와 서버 설명이 2초씩 바뀌며 나옵니다.
-- 로고는 리소스 팩에 그림 글자로 들어 있습니다 (`resource_pack/font/glyph_E1.png`, 그림 글자 1개). 로고가 깔끔하게 보이도록 제목/아래 글씨 뒤의 어두운 배경 상자는 리소스 팩에서 투명하게 바꿨습니다 (`resource_pack/textures/ui/hud_tip_text_background.png`, 지우면 원래대로). 로고를 바꾸려면 `tools/logo.png` 를 바꾸고
-  `python3 tools/make_logo_glyph.py` 를 실행하세요.
+- 로고는 리소스 팩 UI(`resource_pack/ui/hud_screen.json`)가 고화질 그림(`resource_pack/textures/ui/mlc_logo.png`)으로 화면 위쪽에 띄웁니다.
+  크기/위치는 `hud_screen.json` 의 `size`, `offset` 에서 바꿀 수 있습니다. 로고를 바꾸려면 `mlc_logo.png` 를 바꾸세요.
+- UI 방식이 안 보이면 `config.js` 의 `intro.image` 를 `false` 로 바꾸면 예전 방식(그림 글자 `font/glyph_E1.png`, 화질 낮음)으로 돌아갑니다.
+- 제목/아래 글씨 뒤의 어두운 배경 상자는 리소스 팩에서 투명하게 바꿨습니다 (`resource_pack/textures/ui/hud_tip_text_background.png`, 지우면 원래대로).
 - 설명 문구와 시간은 `config.js` 의 `intro` 에서 바꿀 수 있습니다. 관리자는 `/hll` 로 이 화면을 다시 볼 수 있습니다.
 
 ### 3. 위더 2시간 제한
