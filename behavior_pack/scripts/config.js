@@ -2,7 +2,7 @@
 // 숫자를 바꾼 뒤 팩을 다시 만들어 적용하면 됩니다.
 
 // 렐름에 새 버전이 제대로 적용됐는지 /mlc 상태 와 관리자 접속 알림에서 확인할 수 있음
-export const VERSION = "1.17.0";
+export const VERSION = "1.18.0";
 
 export const CONFIG = {
   // 관리자 게이머태그 (대소문자/띄어쓰기 무시하고 비교)
@@ -23,6 +23,7 @@ export const CONFIG = {
   },
 
   newSpawn: {
+    // 관리자가 /시작2 를 입력한 뒤부터 동작 (그 전에 들어온 사람은 기존 플레이어로 기록되어 안 옮겨짐)
     enabled: true,
     // 처음 들어온 플레이어를 월드 스폰에서 이 거리 사이 랜덤 위치로 보냄
     minDistance: 2000,

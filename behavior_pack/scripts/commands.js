@@ -14,6 +14,7 @@ import { openReportInbox, openReportMenu } from "./reports.js";
 import { openBanMenu, openUnbanMenu } from "./bans.js";
 import { hideAdmin, isSilent, revealAdmin } from "./joinleave.js";
 import { showIntro } from "./intro.js";
+import { armNewSpawn, disarmNewSpawn, isNewSpawnArmed } from "./spawn.js";
 
 const HELP = [
   "§e/신고§r - 플레이어 신고 (누구나)",
@@ -21,6 +22,7 @@ const HELP = [
   "§e/밴§r, §e/밴해제§r - 밴 / 밴 해제 (관리자)",
   "§e/mlc 게임모드§r - 관리자 제외 모두 강제 서바이벌 + 커맨드 블록 제거 (다시 입력하면 해제)",
   "§e/mlc 공개§r / §e/mlc 조용히§r - 접속 알리기 / 투명하게 숨기 (관리자)",
+  "§e/시작2§r - 이제부터 처음 들어오는 사람만 랜덤 좌표 + 로고 화면 (그 전에 들어왔던 사람은 제외, 관리자). 끄기: §e/mlc 시작2끄기",
   "§e/hll§r - 처음 들어온 플레이어가 보는 로고 화면 보기 (관리자)",
   "§e/mlc 테스트§r - 관리자도 복사/엑스레이/꾸러미 검사 받기 (켜기/끄기)",
   "§e/mlc 상태§r, §e/mlc 스캔§r, §e/mlc 로그§r",
@@ -58,6 +60,21 @@ function hll(origin) {
   if (!player) return fail("플레이어만 사용할 수 있습니다.");
   if (!isAdmin(player)) return fail("§c관리자만 사용할 수 있는 명령어입니다.");
   system.run(() => showIntro(player));
+  return { status: CustomCommandStatus.Success };
+}
+
+/** /시작2 : 랜덤 좌표 시작 켜기 (관리자) */
+function start2(origin) {
+  const player = getPlayer(origin);
+  if (!player) return fail("플레이어만 사용할 수 있습니다.");
+  if (!isAdmin(player)) return fail("§c관리자만 사용할 수 있는 명령어입니다.");
+  if (isNewSpawnArmed()) return ok("이미 켜져 있습니다. 처음 들어오는 사람은 랜덤 좌표로 갑니다. (끄기: /mlc 시작2끄기)");
+  system.run(() => {
+    const count = armNewSpawn();
+    player.sendMessage(
+      PREFIX + `§a랜덤 좌표 시작 ON§r - 지금까지 들어왔던 ${count}명은 기존 플레이어로 기록했습니다. 이제부터 처음 들어오는 사람만 ${CONFIG.newSpawn.minDistance}~${CONFIG.newSpawn.maxDistance}칸 떨어진 곳 + 로고 화면으로 시작합니다.`
+    );
+  });
   return { status: CustomCommandStatus.Success };
 }
 
@@ -101,6 +118,13 @@ function mlc(origin, action) {
     case "hide":
       system.run(() => hideAdmin(player));
       return ok("조용히 모드: 투명 상태가 되고 나갈 때 퇴장 메시지가 안 뜹니다. (이미 뜬 접속 메시지는 지울 수 없음)");
+    case "시작2":
+    case "start2":
+      return start2(origin);
+    case "시작2끄기":
+    case "start2off":
+      system.run(() => disarmNewSpawn());
+      return ok("§c랜덤 좌표 시작 OFF§r - 처음 들어오는 사람도 그냥 월드 스폰에서 시작합니다. (들어온 사람은 계속 기존 플레이어로 기록됨)");
     case "hll":
     case "로고":
       system.run(() => showIntro(player));
@@ -119,7 +143,7 @@ function mlc(origin, action) {
     case "상태":
     case "status":
       return ok(
-        `MLC v${VERSION} - 내 주변 몹 ${mobCount(player)}/${CONFIG.mobCap.perPlayer}마리, 강제 서바이벌: ${isForceSurvival() ? "§aON" : "§cOFF"}§r, 접속자 ${world.getAllPlayers().length}명, ` +
+        `MLC v${VERSION} - 랜덤 좌표 시작: ${isNewSpawnArmed() ? "§aON" : "§cOFF (/시작2)"}§r, 내 주변 몹 ${mobCount(player)}/${CONFIG.mobCap.perPlayer}마리, 강제 서바이벌: ${isForceSurvival() ? "§aON" : "§cOFF"}§r, 접속자 ${world.getAllPlayers().length}명, ` +
           `제거한 커맨드 블록 ${getRemovalLog().length}개(최근 기록)`
       );
     case "스캔":
@@ -163,9 +187,11 @@ system.beforeEvents.startup.subscribe(({ customCommandRegistry }) => {
   register("mlc:ban", "플레이어 밴 (관리자)", ban);
   register("mlc:unban", "밴 해제 (관리자)", unban);
   register("mlc:hll", "서버 로고 화면 보기 (관리자)", hll);
+  register("mlc:start2", "랜덤 좌표 시작 켜기 (관리자)", start2);
   // 한글 이름 (/신고, /신고함, /밴, /밴해제)
   register("mlc:신고", "플레이어 신고", report);
   register("mlc:신고함", "신고함 (관리자)", reportInbox);
   register("mlc:밴", "플레이어 밴 (관리자)", ban);
   register("mlc:밴해제", "밴 해제 (관리자)", unban);
+  register("mlc:시작2", "랜덤 좌표 시작 켜기 (관리자)", start2);
 });

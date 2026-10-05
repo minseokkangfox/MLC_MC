@@ -2,6 +2,7 @@ import { EquipmentSlot, system, world } from "@minecraft/server";
 import { CONFIG } from "./config.js";
 import { PREFIX, isAdmin } from "./util.js";
 import { INTRO_TICKS, showIntro } from "./intro.js";
+import { getKnownPlayers } from "./players.js";
 
 const KNOWN_KEY = "mlc:known";
 const PENDING_KEY = "mlc:pendingRelocate";
@@ -44,6 +45,29 @@ function looksBrandNew(player) {
 // id 와 이름 둘 다로 저장 (렐름에서 id 가 바뀌어도 이름으로 알아봄)
 const stateKey = (player) => `mlc:sp:${player.id}`;
 const nameKey = (player) => `mlc:spn:${player.name.toLowerCase().replace(/\s+/g, "")}`;
+
+// /시작2 를 입력해야 랜덤 좌표 시작이 켜짐. 그 전에 들어온 사람은 전부 기존 플레이어로 기록됨
+const ARMED_KEY = "mlc:spawnArmed";
+
+export function isNewSpawnArmed() {
+  return world.getDynamicProperty(ARMED_KEY) === true;
+}
+
+/** /시작2: 지금까지 들어왔던 사람(접속 중 포함)은 기존 플레이어로 확정하고, 이후 처음 들어오는 사람만 랜덤 좌표로 */
+export function armNewSpawn() {
+  let count = 0;
+  for (const known of getKnownPlayers()) {
+    world.setDynamicProperty(stateKey(known), "done");
+    world.setDynamicProperty(nameKey(known), "done");
+    count++;
+  }
+  world.setDynamicProperty(ARMED_KEY, true);
+  return count;
+}
+
+export function disarmNewSpawn() {
+  world.setDynamicProperty(ARMED_KEY, false);
+}
 
 function getState(player) {
   if (world.getDynamicProperty(nameKey(player)) === "done") return "done";
@@ -162,6 +186,13 @@ world.afterEvents.playerSpawn.subscribe(({ player, initialSpawn }) => {
     if (!player.isValid) return;
     let state = getState(player);
     if (state === "done") return;
+
+    // /시작2 전: 랜덤 좌표로 보내지 않고 기존 플레이어로 기록만 함
+    if (state === undefined && !isNewSpawnArmed()) {
+      setState(player, "done");
+      player.setDynamicProperty(KNOWN_KEY, true);
+      return;
+    }
 
     // 이전 버전 기록이 있으면 (옮기던 중이었어도) 더는 옮기지 않음
     if (state === undefined && player.getDynamicProperty(PENDING_KEY) === true) {
