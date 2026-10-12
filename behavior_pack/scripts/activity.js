@@ -574,10 +574,14 @@ function isProtectedMob(entity) {
 }
 
 function killerOf(damageSource) {
-  const attacker = damageSource?.damagingEntity;
-  if (!attacker) return undefined;
-  if (attacker.typeId === "minecraft:player") return attacker.id;
-  return explosiveOwner(attacker) ?? witherOwner(attacker); // TNT / 그 사람이 소환한 위더로 죽인 경우
+  try {
+    const attacker = damageSource?.damagingEntity;
+    if (!attacker?.isValid) return undefined; // 이미 사라진 엔티티는 typeId 를 읽으면 오류
+    if (attacker.typeId === "minecraft:player") return attacker.id;
+    return explosiveOwner(attacker) ?? witherOwner(attacker); // TNT / 그 사람이 소환한 위더로 죽인 경우
+  } catch {
+    return undefined;
+  }
 }
 
 world.afterEvents.entityHurt.subscribe(({ hurtEntity, damageSource }) => {
