@@ -10,9 +10,12 @@ import { CONFIG, VERSION } from "./config.js";
 import { mobCount } from "./mobcap.js";
 import { isForceSurvival, setForceSurvival } from "./gamemode.js";
 import { getRemovalLog, requestUrgentScan } from "./cmdblock.js";
-import { openReportInbox, openReportMenu } from "./reports.js";
-import { openBanMenu, openUnbanMenu } from "./bans.js";
-import { hideAdmin, isSilent, revealAdmin } from "./joinleave.js";
+// 밴/신고/접속 기능은 렐름이 다 켜진 뒤에 불러오므로(main.js) 여기서는 쓸 때 불러옴
+const lazy = (path, name) => (...args) => import(path).then((module) => module[name](...args));
+const openReportMenu = lazy("./reports.js", "openReportMenu");
+const openReportInbox = lazy("./reports.js", "openReportInbox");
+const openBanMenu = lazy("./bans.js", "openBanMenu");
+const openUnbanMenu = lazy("./bans.js", "openUnbanMenu");
 import { showIntro } from "./intro.js";
 import { MessageFormData } from "@minecraft/server-ui";
 import { showForm } from "./forms.js";
@@ -126,12 +129,26 @@ function mlc(origin, action) {
     }
     case "공개":
     case "show":
-      if (!isSilent(player)) return ok("이미 공개 상태입니다.");
-      system.run(() => revealAdmin(player));
-      return ok("접속을 알렸습니다. (투명 해제)");
+      system.run(() => {
+        import("./joinleave.js")
+          .then(({ isSilent, revealAdmin }) => {
+            if (!isSilent(player)) {
+              player.sendMessage(PREFIX + "이미 공개 상태입니다.");
+              return;
+            }
+            revealAdmin(player);
+            player.sendMessage(PREFIX + "접속을 알렸습니다. (투명 해제)");
+          })
+          .catch(() => {});
+      });
+      return { status: CustomCommandStatus.Success };
     case "조용히":
     case "hide":
-      system.run(() => hideAdmin(player));
+      system.run(() => {
+        import("./joinleave.js")
+          .then(({ hideAdmin }) => hideAdmin(player))
+          .catch(() => {});
+      });
       return ok("조용히 모드: 투명 상태가 되고 나갈 때 퇴장 메시지가 안 뜹니다. (이미 뜬 접속 메시지는 지울 수 없음)");
     case "시작2":
     case "start2":

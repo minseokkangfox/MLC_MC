@@ -67,20 +67,31 @@ async function askAdmin(player) {
   }
 }
 
+function askLater(player) {
+  // 고를 때까지는 조용히 + 투명
+  hideAdmin(player);
+  // 접속 로딩 화면이 끝난 뒤에 물어봄
+  system.runTimeout(() => {
+    if (player.isValid) afterLoading(player, () => askAdmin(player).catch(() => {}));
+  }, 20);
+}
+
 world.afterEvents.playerSpawn.subscribe(({ player, initialSpawn }) => {
   if (!initialSpawn) return;
   if (isBanned(player)) return;
   if (isAdmin(player)) {
-    // 고를 때까지는 조용히 + 투명
-    hideAdmin(player);
-    // 접속 로딩 화면이 끝난 뒤에 물어봄
-    system.runTimeout(() => {
-      if (player.isValid) afterLoading(player, () => askAdmin(player).catch(() => {}));
-    }, 20);
+    askLater(player);
     return;
   }
   announceJoin(player);
 });
+
+/** 이 기능이 불러와지기 전에 이미 들어와 있던 관리자 (렐름은 첫 접속 때 켜지므로 항상 있음) */
+export function handleEarlyPlayers() {
+  for (const player of world.getAllPlayers()) {
+    if (isAdmin(player) && !silent.has(player.id)) askLater(player);
+  }
+}
 
 world.beforeEvents.playerLeave.subscribe(({ player }) => {
   const name = player.name;
